@@ -1,0 +1,202 @@
+/* จัดตำแหน่งและ Ambient Glow ด้านหลัง */
+.liquid-battery-wrapper {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 15px;
+}
+
+.battery-outer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 130px;
+}
+
+/* ขั้วแบตเตอรี่ด้านบน */
+.battery-cap {
+  width: 42px;
+  height: 12px;
+  background: #ffffff;
+  border-radius: 6px 6px 0 0;
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.8);
+  margin-bottom: -2px;
+  z-index: 2;
+}
+
+/* ตัวถังแก้วแบตเตอรี่ */
+.battery-body {
+  position: relative;
+  width: 130px;
+  height: 220px;
+  border: 5px solid #ffffff;
+  border-radius: 26px;
+  background: rgba(15, 23, 42, 0.7);
+  box-shadow: 0 0 25px rgba(0, 0, 0, 0.6),
+              inset 0 0 15px rgba(255, 255, 255, 0.2);
+  overflow: hidden;
+  backdrop-filter: blur(8px);
+}
+
+/* แสงสะท้อนกระจกเงาด้านบน (Glass Glare) */
+.glass-glare {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 100%;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.35) 0%,
+    rgba(255, 255, 255, 0.08) 35%,
+    transparent 35%
+  );
+  z-index: 10;
+  pointer-events: none;
+}
+
+/* ระดับของเหลว (Liquid Fill) */
+.liquid-fill {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  transition: height 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 0 0 20px 20px;
+}
+
+/* 🟢 สถานะปกติ (> 40%) - สีเขียวเรืองแสง */
+.liquid-battery-wrapper.good .liquid-fill {
+  background: linear-gradient(180deg, #34d399 0%, #10b981 50%, #047857 100%);
+  box-shadow: 0 0 30px rgba(16, 185, 129, 0.7);
+}
+.liquid-battery-wrapper.good .wave path {
+  fill: #34d399;
+}
+
+/* 🟡 สถานะเตือน (21-40%) - สีส้ม */
+.liquid-battery-wrapper.warning .liquid-fill {
+  background: linear-gradient(180deg, #fbbf24 0%, #f59e0b 50%, #b45309 100%);
+  box-shadow: 0 0 30px rgba(245, 158, 11, 0.7);
+}
+.liquid-battery-wrapper.warning .wave path {
+  fill: #fbbf24;
+}
+
+/* 🔴 สถานะวิกฤต (<= 20%) - สีแดง */
+.liquid-battery-wrapper.critical .liquid-fill {
+  background: linear-gradient(180deg, #f87171 0%, #ef4444 50%, #b91c1c 100%);
+  box-shadow: 0 0 30px rgba(239, 68, 68, 0.7);
+}
+.liquid-battery-wrapper.critical .wave path {
+  fill: #f87171;
+}
+
+/* Animation คลื่นน้ำพริ้วไหว (Liquid Waves) */
+.wave {
+  position: absolute;
+  top: -20px;
+  left: 0;
+  width: 200%;
+  height: 26px;
+}
+
+.wave svg {
+  width: 100%;
+  height: 100%;
+}
+
+.wave-1 {
+  opacity: 0.9;
+  animation: waveMotion1 3.5s linear infinite;
+}
+
+.wave-2 {
+  top: -16px;
+  opacity: 0.5;
+  animation: waveMotion2 2.2s linear infinite;
+}
+
+@keyframes waveMotion1 {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+@keyframes waveMotion2 {
+  0% { transform: translateX(-50%); }
+  100% { transform: translateX(0); }
+}
+
+/* ฟองอากาศผุดลอยขึ้น (Bubbles) */
+.bubbles-container {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  bottom: 0;
+  overflow: hidden;
+}
+
+.bubble {
+  position: absolute;
+  bottom: -10px;
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 50%;
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.9);
+  animation: rise 3s infinite ease-in;
+}
+
+.b1 { width: 7px; height: 7px; left: 20%; animation-duration: 3s; animation-delay: 0s; }
+.b2 { width: 10px; height: 10px; left: 45%; animation-duration: 3.8s; animation-delay: 0.8s; }
+.b3 { width: 5px; height: 5px; left: 65%; animation-duration: 2.4s; animation-delay: 0.3s; }
+.b4 { width: 9px; height: 9px; left: 80%; animation-duration: 3.2s; animation-delay: 1.2s; }
+.b5 { width: 6px; height: 6px; left: 35%; animation-duration: 2.7s; animation-delay: 1.8s; }
+
+@keyframes rise {
+  0% {
+    transform: translateY(0) scale(0.8);
+    opacity: 0;
+  }
+  20% {
+    opacity: 0.8;
+  }
+  100% {
+    transform: translateY(-200px) scale(1.2);
+    opacity: 0;
+  }
+}
+
+/* ตัวเลขเปอร์เซ็นต์ตรงกลาง */
+.battery-percentage {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 20;
+  font-size: 2rem;
+  font-weight: 800;
+  color: #ffffff;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.8),
+               0 0 15px rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  user-select: none;
+}
+
+.battery-percentage .unit {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.charging-icon {
+  font-size: 1.3rem;
+  color: #fde047;
+  margin-left: 2px;
+  animation: pulse 0.8s infinite alternate;
+}
+
+@keyframes pulse {
+  from { transform: scale(1); opacity: 0.7; }
+  to { transform: scale(1.2); opacity: 1; }
+}

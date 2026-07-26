@@ -1,0 +1,109 @@
+import React, { useState } from "react";
+import { LayoutDashboard, ShieldCheck, LogOut } from "lucide-react";
+import BMSDashboard from "./BMSDashboard.jsx";
+import AdminMonitor from "./AdminMonitor.jsx";
+import Login from "./Login.jsx";
+import { ThemeRoot } from "./components/ThemeRoot.jsx";
+import { ThemeProvider } from "./context/ThemeContext.jsx";
+import { AuthProvider, useAuth } from "./context/AuthContext.jsx";
+import { HubDataProvider } from "./context/HubDataContext.jsx";
+import { LogoutModal } from "./components/LogoutModal.jsx";
+
+const PAGES = [
+  // Dashboard (live per-device telemetry + Configuration) is user-role only -
+  // admin sessions only ever get Admin Monitor's fleet view, per explicit
+  // instruction. Admin already has full data access to every hub either way
+  // (that's what makes them admin) - this is a page-routing choice, not a
+  // security boundary, unlike Admin Monitor below.
+  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, userOnly: true },
+  // Admin Monitor is only ever added to this list for role="admin" sessions
+  // (see AuthedApp below) - hiding it here is a UX nicety, not the security
+  // boundary. The actual boundary is server-side: every /api/admin/* route
+  // requires requireRole('admin') regardless of what the frontend renders.
+  { id: "admin", label: "Admin Monitor", icon: ShieldCheck, adminOnly: true },
+];
+
+function AuthedApp() {
+  const { user, logout } = useAuth();
+  const defaultPage = user.role === "admin" ? "admin" : "dashboard";
+  const [page, setPage] = useState(defaultPage);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const pages = PAGES.filter((p) => (p.adminOnly ? user.role === "admin" : !p.userOnly || user.role !== "admin"));
+  const activePage = pages.find((p) => p.id === page) ? page : defaultPage;
+
+  return (
+    <HubDataProvider>
+      <div className="mx-auto flex max-w-7xl items-center justify-between gap-1 px-3 pt-4 sm:px-5 md:px-7">
+        <div className="flex items-center gap-1">
+          {pages.map((p) => {
+            const Icon = p.icon;
+            const active = p.id === activePage;
+            return (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => setPage(p.id)}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  active
+                    ? "bg-[var(--brand-10)] text-[var(--brand)]"
+                    : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                }`}
+              >
+                <Icon className="size-3.5" />
+                {p.label}
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-[var(--muted-foreground)]">
+            {user.email} · <span className="font-semibold text-[var(--foreground)]">{user.role}</span>
+          </span>
+          {/* Dashboard renders its own logout button (TopBar.jsx) - this one
+              only needs to appear on pages that don't, i.e. Admin Monitor,
+              which admin-only sessions land on since they no longer have a
+              Dashboard tab at all. */}
+          {activePage !== "dashboard" && (
+            <button
+              type="button"
+              onClick={() => setShowLogoutModal(true)}
+              title="Logout"
+              className="group inline-flex size-8 cursor-pointer items-center justify-center rounded-full bg-[var(--card)] text-[var(--critical)] ring-1 ring-[var(--border)] shadow-sm transition-all duration-200 hover:bg-red-50 hover:ring-red-200 hover:scale-105 active:scale-95"
+            >
+              <LogOut className="size-4 transition-transform duration-300 group-hover:-translate-x-0.5" />
+            </button>
+          )}
+        </div>
+      </div>
+      {activePage === "dashboard" ? <BMSDashboard /> : <AdminMonitor />}
+      <LogoutModal
+        isOpen={showLogoutModal}
+        onClose={() => setShowLogoutModal(false)}
+        onConfirm={() => {
+          setShowLogoutModal(false);
+          logout();
+        }}
+      />
+    </HubDataProvider>
+  );
+}
+
+function Gate() {
+  const { isAuthenticated, loading } = useAuth();
+  if (loading) {
+    return <div className="flex min-h-screen items-center justify-center text-sm text-[var(--muted-foreground)]" />;
+  }
+  return isAuthenticated ? <AuthedApp /> : <Login />;
+}
+
+export default function App() {
+  return (
+    <ThemeProvider>
+      <ThemeRoot>
+        <AuthProvider>
+          <Gate />
+        </AuthProvider>
+      </ThemeRoot>
+    </ThemeProvider>
+  );
+}

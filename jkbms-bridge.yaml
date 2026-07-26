@@ -1,0 +1,377 @@
+esphome:
+  name: jkbms-bridge
+  friendly_name: "JK BMS BLE Bridge"
+  # Mirrors the BMS's own applied settings to Firebase ONCE, 20s after boot
+  # (giving WiFi/BLE time to connect) - not on a recurring interval anymore.
+  # It used to re-push every 10s, which meant: user edits a value in the
+  # dashboard -> poll (4s) applies it to the BMS -> but this push (10s) could
+  # still catch the entity mid-flight (before the BLE write to the real BMS
+  # confirms) and echo the OLD value back to Firebase, stomping the user's
+  # edit right after they made it. A single post-boot snapshot still gives
+  # the dashboard real starting values without fighting every future write.
+  on_boot:
+    - priority: -100
+      then:
+        - delay: 20s
+        - http_request.send:
+            method: PATCH
+            url: ${firebase_settings_url}
+            json: |-
+              root["overVoltageProtection"] = id(bms_cell_ovp).state;
+              root["overVoltageRecovery"] = id(bms_cell_ovpr).state;
+              root["underVoltageProtection"] = id(bms_cell_uvp).state;
+              root["underVoltageRecovery"] = id(bms_cell_uvpr).state;
+              root["cellCount"] = id(bms_cell_count).state;
+              root["capacityAh"] = id(bms_capacity).state;
+              root["balDeltaVolt"] = id(bms_bal_delta_volt).state;
+              root["balStartVolt"] = id(bms_bal_start_volt).state;
+              root["maxBalanceCurrent"] = id(bms_max_bal_current).state;
+              root["balancerSwitch"] = id(bms_balancer).state;
+              root["chargingSwitch"] = id(bms_charging).state;
+              root["dischargingSwitch"] = id(bms_discharging).state;
+        # espBuildDate for Admin Monitor's "ESP Build Date" column - __DATE__
+        # is a C++ compiler macro, baked in at compile time (e.g. "Jul 23
+        # 2026"), so this reflects when the firmware was BUILT, not flashed.
+        # PATCH here only touches this one key - deviceId/expirationDate
+        # (admin-set from the dashboard) are untouched by this push.
+        - http_request.send:
+            method: PATCH
+            url: ${firebase_admin_url}
+            json: |-
+              root["espBuildDate"] = __DATE__;
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+# Required - this is a third-party component, not built into ESPHome.
+external_components:
+  - source: github://syssi/esphome-jk-bms@main
+    refresh: 0s  # always pull latest during setup; pin to a tag once stable
+
+wifi:
+  ssid: "YOUR_WIFI_SSID"
+  password: "YOUR_WIFI_PASSWORD"
+
+web_server:
+  port: 80
+
+time:
+  - platform: sntp
+    id: sntp_time
+
+# Firebase REST endpoints. The fleet moved to an account-level hub keyed by
+# email, with each physical BMS nested under it by hardware id (confirmed
+# live via direct REST reads 2026-07-24) - "C847807A5311" here is this
+# board's own MAC (C8:47:80:7A:53:11) with the colons stripped, matching
+# BMSDashboard.jsx's BMS_FLEET[0].path. NOTE: nothing confirms this exact
+# jkbms-bridge.yaml is what's actually producing that live structure right
+# now (the real data doesn't match this file's field names 1:1 either) -
+# these paths are kept in sync for whenever this file IS what's flashed.
+# If you flash this onto a different ESP32/account, update the account
+# email and device id below (and BMSDashboard.jsx's matching path) to match.
+substitutions:
+  firebase_status_url: "https://jkbms-32dfe-default-rtdb.asia-southeast1.firebasedatabase.app/JK_BMS_HUB/Suntreehouse287@gmail_com/C847807A5311/status.json"
+  firebase_settings_url: "https://jkbms-32dfe-default-rtdb.asia-southeast1.firebasedatabase.app/JK_BMS_HUB/Suntreehouse287@gmail_com/C847807A5311/settings.json"
+  # New node for Admin Monitor (AdminMonitor.jsx) - deviceId/expirationDate
+  # are set by an admin from that page; espBuildDate is the only one this
+  # firmware itself ever writes (see on_boot below).
+  firebase_admin_url: "https://jkbms-32dfe-default-rtdb.asia-southeast1.firebasedatabase.app/JK_BMS_HUB/Suntreehouse287@gmail_com/C847807A5311/admin.json"
+  # This pack is 4S LiFePO4 (4 x 3.2V) - used only for the dailyCharge/DischargeKwh
+  # push below. Update if this bridge is ever pointed at a different-size pack.
+  nominal_pack_voltage: "12.8"
+
+# Daily Ah counters for dailyChargeAh/dailyDischargeAh (status). restore_value
+# persists them through reboots via the ESP32's own flash (NVS), and
+# g_daily_energy_day_key is how we detect the local date has rolled over so
+# they reset at midnight instead of growing forever. g_last_integration_ms
+# is intentionally NOT persisted - it's just "time since last tick", reset
+# to 0 on every boot so the first tick after a reboot is skipped rather than
+# integrating over a bogus multi-day gap.
+globals:
+  - id: g_daily_charged_ah
+    type: float
+    restore_value: yes
+    initial_value: "0.0"
+  - id: g_daily_discharged_ah
+    type: float
+    restore_value: yes
+    initial_value: "0.0"
+  - id: g_daily_energy_day_key
+    type: int
+    restore_value: yes
+    initial_value: "-1"
+  - id: g_last_integration_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
+
+http_request:
+  useragent: esphome/jkbms-bridge
+  timeout: 10s
+  # TODO: this skips TLS certificate verification - fine for getting things
+  # working, but switch to real verification before this runs unattended
+  # long-term (see ESPHome's http_request docs on certificate authorities).
+  verify_ssl: false
+
+# Passive scan is what the component's own examples use for BLE clients.
+esp32_ble_tracker:
+  scan_parameters:
+    active: false
+
+ble_client:
+  - mac_address: "C8:47:80:7A:53:11"   # your real device, confirmed from earlier debugging
+    id: jkbms_ble_id
+
+jk_bms_ble:
+  - ble_client_id: jkbms_ble_id
+    # JK02_32S matches the maintainer's "v15" example, which lines up with
+    # your device's software_version 15.41 seen in earlier Firebase data.
+    # If nothing shows up after flashing, JK02_24S is the other main
+    # candidate to try (older hardware revisions).
+    protocol_version: JK02_32S
+    throttle: 5s
+    id: bms0
+
+# ==========================================
+# Sensors (read side - replaces your hand-rolled parseData()/bms_settings())
+# ==========================================
+sensor:
+  - platform: jk_bms_ble
+    jk_bms_ble_id: bms0
+    total_voltage:
+      name: "Total Voltage"
+      id: bms_total_voltage
+    current:
+      name: "Current"
+      id: bms_current
+    power:
+      name: "Power"
+      id: bms_power
+    state_of_charge:
+      name: "State of Charge"
+      id: bms_soc
+    capacity_remaining:
+      name: "Capacity Remaining"
+      id: bms_capacity_remaining
+    min_cell_voltage:
+      name: "Min Cell Voltage"
+      id: bms_min_cell_voltage
+    max_cell_voltage:
+      name: "Max Cell Voltage"
+      id: bms_max_cell_voltage
+    delta_cell_voltage:
+      name: "Cell Delta Voltage"
+      id: bms_delta_cell_voltage
+    average_cell_voltage:
+      name: "Average Cell Voltage"
+      id: bms_average_cell_voltage
+    # Individual cells - your pack is 4S. Add cell_voltage_5.. if you ever
+    # go bigger. internal: true keeps these out of Home Assistant/API
+    # discovery since they're only needed here for the JSON push below.
+    cell_voltage_1:
+      id: bms_cell_1
+      internal: true
+    cell_voltage_2:
+      id: bms_cell_2
+      internal: true
+    cell_voltage_3:
+      id: bms_cell_3
+      internal: true
+    cell_voltage_4:
+      id: bms_cell_4
+      internal: true
+
+# ==========================================
+# Switches (on/off controls)
+# ==========================================
+switch:
+  - platform: jk_bms_ble
+    jk_bms_ble_id: bms0
+    charging:
+      name: "Charging Switch"
+      id: bms_charging
+    discharging:
+      name: "Discharging Switch"
+      id: bms_discharging
+    balancer:
+      name: "Balancer Switch"
+      id: bms_balancer
+
+# ==========================================
+# Numbers (writable parameters - this is the part that never worked in the
+# hand-rolled version; the component's own write-to-BMS logic has been
+# vetted against real hardware by many users, including the auth/unlock
+# frame we could never confirm ourselves)
+# ==========================================
+number:
+  - platform: jk_bms_ble
+    jk_bms_ble_id: bms0
+    cell_count:
+      name: "Cell Count"
+      id: bms_cell_count
+    total_battery_capacity:
+      name: "Capacity"
+      id: bms_capacity
+    cell_voltage_overvoltage_protection:
+      name: "Cell OVP"
+      id: bms_cell_ovp
+    cell_voltage_overvoltage_recovery:
+      name: "Cell RCV / OVPR"
+      id: bms_cell_ovpr
+    cell_voltage_undervoltage_protection:
+      name: "Cell UVP"
+      id: bms_cell_uvp
+    cell_voltage_undervoltage_recovery:
+      name: "Cell UVPR"
+      id: bms_cell_uvpr
+    cell_soc100_voltage:
+      name: "SOC-100% Volt"
+      id: bms_soc100_volt
+    cell_soc0_voltage:
+      name: "SOC-0% Volt"
+      id: bms_soc0_volt
+    power_off_voltage:
+      name: "PwrOff Volt"
+      id: bms_pwroff_volt
+    max_charge_current:
+      name: "Continued ChgCurr"
+      id: bms_max_charge_current
+    max_discharge_current:
+      name: "Continued DsgCurr"
+      id: bms_max_discharge_current
+    balance_trigger_voltage:
+      name: "Bal. Delta Volt"
+      id: bms_bal_delta_volt
+    balancing_start_voltage:
+      name: "Bal. Start Volt"
+      id: bms_bal_start_volt
+    max_balance_current:
+      name: "Max. Bal. Current"
+      id: bms_max_bal_current
+
+# ==========================================
+# Firebase bridge (this is the new part - replaces uploadStatusToFirebase(),
+# pollSettingsFromFirebase(), and applySettingFromFirebase() from the old
+# hand-rolled C++)
+# ==========================================
+interval:
+  # --- COULOMB-COUNT: daily charged/discharged Ah, every 2s -------------
+  # jk_bms_ble's "current" sensor is signed (positive = charging, negative =
+  # discharging - confirmed against the component's own source, which
+  # computes power_sensor_ as total_voltage * current directly), so the
+  # sign of bms_current.state alone tells us which bucket to add into.
+  - interval: 2s
+    then:
+      - lambda: |-
+          if (!id(sntp_time).now().is_valid()) return;
+          auto now = id(sntp_time).now();
+          int today_key = now.year * 1000 + now.day_of_year;
+          if (id(g_daily_energy_day_key) != today_key) {
+            id(g_daily_energy_day_key) = today_key;
+            id(g_daily_charged_ah) = 0.0f;
+            id(g_daily_discharged_ah) = 0.0f;
+          }
+
+          uint32_t now_ms = millis();
+          uint32_t last_ms = id(g_last_integration_ms);
+          id(g_last_integration_ms) = now_ms;
+          if (last_ms == 0) return; // first tick since boot - no valid dt yet
+
+          float dt_hours = (now_ms - last_ms) / 3600000.0f;
+          if (dt_hours <= 0 || dt_hours > 0.1f) return; // skip bogus/huge gaps
+
+          float current = id(bms_current).state;
+          if (std::isnan(current)) return;
+          float ah = fabsf(current) * dt_hours;
+          if (current > 0.01f) {
+            id(g_daily_charged_ah) += ah;
+          } else if (current < -0.01f) {
+            id(g_daily_discharged_ah) += ah;
+          }
+
+  # --- PUSH: live status -> Firebase, every 5s -------------------------
+  - interval: 5s
+    then:
+      - http_request.send:
+          method: PATCH
+          url: ${firebase_status_url}
+          json: |-
+            root["totalVoltage"] = id(bms_total_voltage).state;
+            root["power"] = id(bms_power).state;
+            root["current"] = id(bms_current).state;
+            root["soc"] = id(bms_soc).state;
+            root["capacity_remain"] = id(bms_capacity_remaining).state;
+            root["average_cell_voltage"] = id(bms_average_cell_voltage).state;
+            root["delta_cell_voltage"] = id(bms_delta_cell_voltage).state;
+            root["charge"] = id(bms_charging).state;
+            root["discharge"] = id(bms_discharging).state;
+            root["balance"] = id(bms_balancer).state;
+            root["dailyChargeAh"] = id(g_daily_charged_ah);
+            root["dailyChargeKwh"] = id(g_daily_charged_ah) * ${nominal_pack_voltage} / 1000.0;
+            root["dailyDischargeAh"] = id(g_daily_discharged_ah);
+            root["dailyDischargeKwh"] = id(g_daily_discharged_ah) * ${nominal_pack_voltage} / 1000.0;
+            // No real State-of-Health source exists on this BMS (SOC only) -
+            // honest placeholder, not a measurement. See BMSDashboard.jsx's
+            // matching comment on the mock hook's `soh` constant.
+            root["primaryHealth"] = 100;
+            JsonArray cellVoltages = root.createNestedArray("cellVoltages");
+            cellVoltages.add(id(bms_cell_1).state);
+            cellVoltages.add(id(bms_cell_2).state);
+            cellVoltages.add(id(bms_cell_3).state);
+            cellVoltages.add(id(bms_cell_4).state);
+
+  # --- POLL: settings <- Firebase, every 4s -----------------------------
+  # No manual "last known value" bookkeeping needed here (unlike the old
+  # C++ version's std::map) - each number/switch entity's own .state IS
+  # the last-applied value, since we're the ones who last set it.
+  - interval: 4s
+    then:
+      - http_request.get:
+          url: ${firebase_settings_url}
+          capture_response: true
+          on_response:
+            then:
+              - lambda: |-
+                  json::parse_json(body, [](JsonObject root) -> bool {
+                    auto apply_number = [](esphome::number::Number *n, float v) {
+                      if (!n->has_state() || fabsf(n->state - v) > 0.0001f) {
+                        auto call = n->make_call();
+                        call.set_value(v);
+                        call.perform();
+                      }
+                    };
+                    auto apply_switch = [](esphome::switch_::Switch *s, bool on) {
+                      if (!s->has_state() || s->state != on) {
+                        if (on) s->turn_on(); else s->turn_off();
+                      }
+                    };
+
+                    // Field names below match the dashboard's REMOTE_SETTINGS_MAP
+                    // (BMSDashboard.jsx) exactly - it translates its own camelCase
+                    // keys to these before writing, and reads them back the same
+                    // way.
+                    if (root.containsKey("overVoltageProtection")) apply_number(id(bms_cell_ovp), root["overVoltageProtection"]);
+                    if (root.containsKey("overVoltageRecovery")) apply_number(id(bms_cell_ovpr), root["overVoltageRecovery"]);
+                    if (root.containsKey("underVoltageProtection")) apply_number(id(bms_cell_uvp), root["underVoltageProtection"]);
+                    if (root.containsKey("underVoltageRecovery")) apply_number(id(bms_cell_uvpr), root["underVoltageRecovery"]);
+                    if (root.containsKey("socFullVolt")) apply_number(id(bms_soc100_volt), root["socFullVolt"]);
+                    if (root.containsKey("soc0Volt")) apply_number(id(bms_soc0_volt), root["soc0Volt"]);
+                    if (root.containsKey("pwrOffVolt")) apply_number(id(bms_pwroff_volt), root["pwrOffVolt"]);
+                    if (root.containsKey("contChgCurr")) apply_number(id(bms_max_charge_current), root["contChgCurr"]);
+                    if (root.containsKey("contDsgCurr")) apply_number(id(bms_max_discharge_current), root["contDsgCurr"]);
+                    // Dashboard writes this already converted to volts (its
+                    // mV field / 1000) - no conversion needed here.
+                    if (root.containsKey("balDeltaVolt")) apply_number(id(bms_bal_delta_volt), root["balDeltaVolt"]);
+                    if (root.containsKey("balStartVolt")) apply_number(id(bms_bal_start_volt), root["balStartVolt"]);
+                    if (root.containsKey("maxBalanceCurrent")) apply_number(id(bms_max_bal_current), root["maxBalanceCurrent"]);
+                    if (root.containsKey("cellCount")) apply_number(id(bms_cell_count), root["cellCount"]);
+                    if (root.containsKey("capacityAh")) apply_number(id(bms_capacity), root["capacityAh"]);
+
+                    if (root.containsKey("chargingSwitch")) apply_switch(id(bms_charging), root["chargingSwitch"]);
+                    if (root.containsKey("dischargingSwitch")) apply_switch(id(bms_discharging), root["dischargingSwitch"]);
+                    if (root.containsKey("balancerSwitch")) apply_switch(id(bms_balancer), root["balancerSwitch"]);
+
+                    return true;
+                  });
