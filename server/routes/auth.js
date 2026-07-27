@@ -89,9 +89,14 @@ router.get("/admin-exists", (_req, res) => {
 // Bootstrap-only self-registration for the very first admin account -
 // closes permanently the moment one admin row exists (checked here, not
 // just hidden in the UI). Password must match DEFAULT_ADMIN_PASSWORD (a
-// shared setup passphrase from server/.env, not hardcoded) so registration
-// isn't wide open to anyone who finds this endpoint during the bootstrap
-// window - knowing the passphrase is required either way.
+// shared setup passphrase from server/.env, not hardcoded), AND - when
+// DEFAULT_ADMIN_EMAIL is set - the email must match it exactly too: this
+// endpoint used to accept ANY email as long as the setup password was
+// right, so anyone who found/guessed the passphrase during the bootstrap
+// window could register themselves as admin under an email of their own
+// choosing. seed.js (the CLI alternative) already enforced this email
+// pin; this HTTP route just hadn't caught up to it. Same generic error
+// for both mismatches - never let a client tell which one was wrong.
 router.post("/register-admin", async (req, res) => {
   const existing = db.prepare("SELECT 1 FROM users WHERE role = 'admin' LIMIT 1").get();
   if (existing) {
@@ -101,6 +106,10 @@ router.post("/register-admin", async (req, res) => {
   const email = String(req.body?.email || "").trim();
   const password = String(req.body?.password || "");
   if (!email) return res.status(400).json({ error: "Email required" });
+  const pinnedEmail = process.env.DEFAULT_ADMIN_EMAIL;
+  if (pinnedEmail && email.toLowerCase() !== pinnedEmail.toLowerCase()) {
+    return res.status(401).json({ error: "Invalid setup password" });
+  }
   if (password !== process.env.DEFAULT_ADMIN_PASSWORD) {
     return res.status(401).json({ error: "Invalid setup password" });
   }
