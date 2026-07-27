@@ -1,6 +1,7 @@
 import React from "react";
-import { ClipboardList, Settings, LogOut, BatteryFull, Sun, Moon } from "lucide-react"; // เพิ่ม LogOut เข้าไป
+import { Settings, LogOut, BatteryFull, Sun, Moon } from "lucide-react"; // เพิ่ม LogOut เข้าไป
 import { useTheme } from "../context/ThemeContext.jsx";
+import { WeatherButton } from "./WeatherButton.jsx";
 
 /**
  * BmsTabs: Segmented tab bar with smooth active animation & hover feedback -
@@ -55,7 +56,7 @@ export function TopBar({
     tabs,
     activeBmsId,
     onSelectBms,
-    onOpenLog,
+    onOpenWeather,
     onOpenConfig,
     onLogout, // รับฟังก์ชัน onLogout เข้ามา
     configDisabled = false,
@@ -69,15 +70,10 @@ export function TopBar({
 
             {/* Right: Action Buttons */}
             <div className="flex items-center gap-2">
-                {/* System Log Button */}
-                <button
-                    type="button"
-                    onClick={onOpenLog}
-                    className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-[var(--card)] px-3.5 py-2 text-xs font-semibold text-[var(--foreground)] ring-1 ring-[var(--border)] shadow-xs transition-all duration-150 hover:bg-[var(--muted)] active:scale-95"
-                >
-                    <ClipboardList className="size-3.5 text-[var(--muted-foreground)]" />
-                    <span>Log</span>
-                </button>
+                {/* Weather Button - moved here from the outer App.jsx header,
+                    replacing the old System Log slot (Log moved into
+                    Configuration instead, see SettingsPanel.jsx). */}
+                <WeatherButton onClick={onOpenWeather} />
 
                 {/* Configuration Button */}
                 <button

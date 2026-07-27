@@ -9,7 +9,6 @@ import { ThemeProvider } from "./context/ThemeContext.jsx";
 import { AuthProvider, useAuth } from "./context/AuthContext.jsx";
 import { HubDataProvider } from "./context/HubDataContext.jsx";
 import { LogoutModal } from "./components/LogoutModal.jsx";
-import { WeatherButton } from "./components/WeatherButton.jsx";
 import { WeatherModal } from "./components/WeatherModal.jsx";
 import { LocationPermissionModal } from "./components/LocationPermissionModal.jsx";
 import { LocationMovedToast } from "./components/LocationMovedToast.jsx";
@@ -77,12 +76,6 @@ function AuthedApp() {
           )}
         </div>
         <div className="flex items-center gap-2">
-          <WeatherButton
-            onClick={async () => {
-              setShowWeatherModal(true);
-              await weatherLoc.openWeather();
-            }}
-          />
           <span className="text-xs text-[var(--muted-foreground)]">{user.email}</span>
           {/* Dashboard renders its own logout button (TopBar.jsx) - this one
               only needs to appear on pages that don't, i.e. Admin Monitor,
@@ -101,7 +94,13 @@ function AuthedApp() {
         </div>
       </div>
       {activePage === "dashboard" ? (
-        <BMSDashboard onSoftwareVersionChange={setActiveSoftwareVersion} />
+        <BMSDashboard
+          onSoftwareVersionChange={setActiveSoftwareVersion}
+          onOpenWeather={async () => {
+            setShowWeatherModal(true);
+            await weatherLoc.openWeather();
+          }}
+        />
       ) : (
         <AdminMonitor />
       )}

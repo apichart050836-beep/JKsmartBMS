@@ -290,7 +290,7 @@ function Pill({ tone = "brand", icon: Icon, children }) {
 // Main dashboard
 // ---------------------------------------------------------------------------
 
-export default function BMSDashboard({ onSoftwareVersionChange }) {
+export default function BMSDashboard({ onSoftwareVersionChange, onOpenWeather }) {
   const { logout } = useAuth();
   const [now, setNow] = useState(new Date());
   // Persisted across refreshes - slot ids are stable/positional (see
@@ -645,7 +645,7 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
           tabs={slots.filter((s) => s.live).map((s) => ({ id: s.id, name: s.name, mac: s.deviceKey }))}
           activeBmsId={activeBmsId}
           onSelectBms={setActiveBmsId}
-          onOpenLog={() => setShowLog(true)}
+          onOpenWeather={onOpenWeather}
           onOpenConfig={() => setShowConfig(true)}
           configDisabled={active.isLive && active.adminDisabled}
           onLogout={() => setIsLogoutModalOpen(true)}
@@ -841,6 +841,13 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
           batteryType={active.info?.battery_type}
           saveError={saveError}
           onDismissSaveError={() => setSaveError(null)}
+          onOpenLog={() => {
+            // Closes Config first - both use the same fixed inset-0 overlay
+            // z-index, so opening Log while Config is still open would just
+            // stack invisibly underneath it.
+            setShowConfig(false);
+            setShowLog(true);
+          }}
         />
       </Modal>
 

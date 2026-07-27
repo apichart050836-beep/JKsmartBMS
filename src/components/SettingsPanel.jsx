@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { SlidersHorizontal, ShieldAlert, ArrowLeftRight, Cpu, Check } from "lucide-react";
+import { SlidersHorizontal, ShieldAlert, ArrowLeftRight, Cpu, Check, ClipboardList } from "lucide-react";
 import { Toggle, ToggleRow, InputOkRow, SelectRow, AccordionItem } from "./settings/primitives.jsx";
 import { TRIGGER_LIST, CAN_PROTOCOL_LIST, UART_PROTOCOL_LIST } from "./settings/dataLists.js";
 
@@ -131,6 +131,7 @@ export function SettingsPanel({
   batteryType,
   saveError,
   onDismissSaveError,
+  onOpenLog,
 }) {
   const [activeCategory, setActiveCategory] = useState(CATEGORIES[0].id);
 
@@ -156,6 +157,16 @@ export function SettingsPanel({
         </div>
       )}
       {onSaveDeviceName && <DeviceNameRow value={customName} onSave={onSaveDeviceName} />}
+      {onOpenLog && (
+        <button
+          type="button"
+          onClick={onOpenLog}
+          className="mb-3 inline-flex items-center gap-1.5 rounded-lg bg-[var(--muted)] px-3 py-1.5 text-xs font-semibold text-[var(--muted-foreground)] transition-colors hover:bg-[var(--border)] hover:text-[var(--foreground)]"
+        >
+          <ClipboardList className="size-3.5" />
+          System Log
+        </button>
+      )}
       <div className={disabled ? "pointer-events-none opacity-50" : undefined}>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs text-[var(--muted-foreground)]">Editing this pack's parameters - changes apply immediately.</p>
