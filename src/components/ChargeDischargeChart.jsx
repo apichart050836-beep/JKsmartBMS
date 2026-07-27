@@ -19,18 +19,18 @@ import { api } from "../lib/apiClient.js";
 // while real session history is still thin. Clearly labeled as simulated in
 // the UI below, never silently swapped in as if it were live telemetry.
 const MOCK_DATA = [
-  { time: "00:00", current: -3.2 },
-  { time: "02:00", current: -2.8 },
-  { time: "04:00", current: -2.1 },
-  { time: "06:00", current: -1.4 },
-  { time: "08:00", current: 1.8 },
-  { time: "10:00", current: 4.6 },
-  { time: "12:00", current: 5.9 },
-  { time: "14:00", current: 5.1 },
-  { time: "16:00", current: 2.7 },
-  { time: "18:00", current: -1.9 },
-  { time: "20:00", current: -3.6 },
-  { time: "22:00", current: -3.9 },
+  { time: "00:00", hour: 0, current: -3.2 },
+  { time: "02:00", hour: 2, current: -2.8 },
+  { time: "04:00", hour: 4, current: -2.1 },
+  { time: "06:00", hour: 6, current: -1.4 },
+  { time: "08:00", hour: 8, current: 1.8 },
+  { time: "10:00", hour: 10, current: 4.6 },
+  { time: "12:00", hour: 12, current: 5.9 },
+  { time: "14:00", hour: 14, current: 5.1 },
+  { time: "16:00", hour: 16, current: 2.7 },
+  { time: "18:00", hour: 18, current: -1.9 },
+  { time: "20:00", hour: 20, current: -3.6 },
+  { time: "22:00", hour: 22, current: -3.9 },
 ];
 
 const CHARGE_COLOR = "#10b981";
@@ -81,9 +81,14 @@ function AreaTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
   const charge = payload.find((p) => p.dataKey === "charge")?.value;
   const discharge = payload.find((p) => p.dataKey === "discharge")?.value;
+  // The X axis now plots by numeric hour-of-day (so the daily chart always
+  // spans the full 0-24h range regardless of how much of the day has real
+  // data), so `label` here is a bare number (e.g. 13.5) - the human-readable
+  // clock time rides along on each point instead, as timeLabel.
+  const displayLabel = payload[0]?.payload?.timeLabel ?? label;
   return (
     <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs shadow-lg">
-      <p className="mb-1 font-semibold text-[var(--foreground)]">{label}</p>
+      <p className="mb-1 font-semibold text-[var(--foreground)]">{displayLabel}</p>
       {typeof charge === "number" && (
         <p className="tabular-nums" style={{ color: CHARGE_COLOR }}>Charge · {charge.toFixed(2)} A</p>
       )}
@@ -126,16 +131,29 @@ export function ChargeDischargeChart({ history = [], hubId, bmsKey }) {
   const [daily, setDaily] = useState(null);
   const [monthly, setMonthly] = useState(null);
   const [yearly, setYearly] = useState(null);
+  // Distinguishes "fetch still in flight" from "fetch resolved and real
+  // data is genuinely thin" - both used to render the same mock-fallback
+  // UI, which meant the MOCK DATA warning flashed on every single view/date
+  // switch for the ~200-500ms the request takes, even when real data
+  // existed and would show correctly a moment later. Confirmed live: a
+  // day with real logged data rendered the mock banner immediately after
+  // clicking, then the correct real bar chart once the fetch resolved.
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!hubId) return;
+    if (!hubId) {
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
+    setLoading(true);
+    const done = () => !cancelled && setLoading(false);
     if (view === "daily") {
-      api.historyDaily(hubId, bmsKey, toDateStr(cursor)).then((r) => !cancelled && setDaily(r)).catch(() => {});
+      api.historyDaily(hubId, bmsKey, toDateStr(cursor)).then((r) => !cancelled && setDaily(r)).catch(() => {}).finally(done);
     } else if (view === "monthly") {
-      api.historyMonthly(hubId, bmsKey, toMonthStr(cursor)).then((r) => !cancelled && setMonthly(r)).catch(() => {});
+      api.historyMonthly(hubId, bmsKey, toMonthStr(cursor)).then((r) => !cancelled && setMonthly(r)).catch(() => {}).finally(done);
     } else {
-      api.historyYearly(hubId, bmsKey, cursor.getFullYear()).then((r) => !cancelled && setYearly(r)).catch(() => {});
+      api.historyYearly(hubId, bmsKey, cursor.getFullYear()).then((r) => !cancelled && setYearly(r)).catch(() => {}).finally(done);
     }
     return () => {
       cancelled = true;
@@ -179,22 +197,35 @@ export function ChargeDischargeChart({ history = [], hubId, bmsKey }) {
     if (!daily?.points?.length) return [];
     return daily.points
       .filter((p) => typeof p.chargeCurrent === "number")
-      .map((p) => ({
-        time: new Date(p.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        current: p.chargeCurrent,
-      }));
+      .map((p) => {
+        const d = new Date(p.ts);
+        return {
+          time: d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          hour: d.getHours() + d.getMinutes() / 60,
+          current: p.chargeCurrent,
+        };
+      });
   }, [daily]);
 
   const hasRealDaily = dailyPoints.length >= 3;
-  const isAreaMock = view === "daily" && !hasRealDaily;
-  const areaSource = isAreaMock ? MOCK_DATA : hasRealDaily ? dailyPoints : history.map((h) => ({ time: h.time, current: h.current }));
+  // Gated on !loading - see the `loading` state above. Without this, every
+  // view/date switch briefly shows MOCK_DATA (and the warning banner) for
+  // the ~200-500ms the request takes, even on days with plenty of real data,
+  // since `daily` starts each fetch cycle back at its prior/null value.
+  const isAreaMock = view === "daily" && !loading && !hasRealDaily;
+  const areaSource = isAreaMock ? MOCK_DATA : hasRealDaily ? dailyPoints : history.map((h) => ({ time: h.time, hour: h.hour, current: h.current }));
   // Two genuinely separate series (not one line whose color switches at
   // zero) - null on whichever side isn't active at that point, so recharts
   // draws Charge and Discharge as distinct lines instead of one merged,
   // harder-to-read line. Discharge keeps its real negative value (plots
   // below zero), matching "ใช้งาน (-) ลงล่าง" in the header.
+  // `hour` (numeric, 0-24) drives X position so the axis always spans the
+  // full day - a `time`-keyed categorical axis only shows however many
+  // hours actually have data, which looked like the chart was "missing"
+  // the rest of the day per explicit request to always show the full 24h.
   const areaData = areaSource.map((d) => ({
-    time: d.time,
+    hour: d.hour,
+    timeLabel: d.time,
     charge: d.current > 0 ? d.current : null,
     discharge: d.current < 0 ? d.current : null,
   }));
@@ -239,7 +270,7 @@ export function ChargeDischargeChart({ history = [], hubId, bmsKey }) {
           })
         : [];
   const hasBarData = realBarData.some((d) => d.charged !== 0 || d.discharged !== 0);
-  const isBarMock = (view === "monthly" || view === "yearly") && !hasBarData;
+  const isBarMock = (view === "monthly" || view === "yearly") && !loading && !hasBarData;
   const barData = isBarMock
     ? mockBarSeries(
         (view === "monthly" ? monthlySkeleton : yearlySkeleton).map((d) => d.label),
@@ -315,11 +346,18 @@ export function ChargeDischargeChart({ history = [], hubId, bmsKey }) {
         </div>
       </div>
 
-      {(isAreaMock || isBarMock) && (
-        <div className="mb-3 flex items-center gap-2 rounded-xl border-2 border-dashed border-[var(--warning)] bg-[var(--warning-10)] px-4 py-2.5">
-          <TriangleAlert className="size-5 shrink-0 text-[var(--warning)]" />
-          <p className="text-sm font-bold uppercase tracking-wide text-[var(--warning)]">ข้อมูลจำลองเด้อจ้า - MOCK DATA, NOT REAL TELEMETRY</p>
+      {loading ? (
+        <div className="mb-3 flex items-center gap-2 rounded-xl bg-[var(--muted)] px-4 py-2.5">
+          <span className="size-3.5 shrink-0 animate-spin rounded-full border-2 border-[var(--muted-foreground)] border-t-transparent" />
+          <p className="text-xs font-medium text-[var(--muted-foreground)]">กำลังโหลดข้อมูล...</p>
         </div>
+      ) : (
+        (isAreaMock || isBarMock) && (
+          <div className="mb-3 flex items-center gap-2 rounded-xl border-2 border-dashed border-[var(--warning)] bg-[var(--warning-10)] px-4 py-2.5">
+            <TriangleAlert className="size-5 shrink-0 text-[var(--warning)]" />
+            <p className="text-sm font-bold uppercase tracking-wide text-[var(--warning)]">ข้อมูลจำลองเด้อจ้า - MOCK DATA, NOT REAL TELEMETRY</p>
+          </div>
+        )
       )}
 
       <div className="h-56 w-full">
@@ -338,11 +376,14 @@ export function ChargeDischargeChart({ history = [], hubId, bmsKey }) {
               </defs>
               <CartesianGrid stroke="var(--border)" vertical={false} />
               <XAxis
-                dataKey="time"
+                dataKey="hour"
+                type="number"
+                domain={[0, 24]}
+                ticks={[0, 4, 8, 12, 16, 20, 24]}
+                tickFormatter={(h) => `${pad2(h)}:00`}
                 tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
                 axisLine={{ stroke: "var(--border)" }}
                 tickLine={false}
-                interval="preserveStartEnd"
               />
               <YAxis
                 tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}

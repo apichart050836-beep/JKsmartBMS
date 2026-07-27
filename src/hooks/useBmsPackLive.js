@@ -74,7 +74,11 @@ export function useBmsPackLive(config) {
     const avgTemp = tempVals.length ? tempVals.reduce((a, b) => a + b, 0) / tempVals.length : 0;
     const now = new Date();
 
-    setPowerHistory((prev) => [...prev, { time: now.toLocaleTimeString(), current }].slice(-POWER_HISTORY_LEN));
+    setPowerHistory((prev) =>
+      [...prev, { time: now.toLocaleTimeString(), hour: now.getHours() + now.getMinutes() / 60, current }].slice(
+        -POWER_HISTORY_LEN
+      )
+    );
     setLog((prev) =>
       [
         {
