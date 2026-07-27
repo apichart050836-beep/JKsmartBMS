@@ -486,20 +486,21 @@ export default function BMSDashboard() {
   );
 
   // Every pack is live now and needs BOTH signals to count as Online:
-  // - firebaseConnected: Firebase's own ".info/connected" presence path,
-  //   which flips false the moment the SDK's websocket actually times out
-  //   or drops (this is the "does Firebase respond" check).
-  // - fresh data: a status push within the last 10s. jkbms-bridge.yaml
-  //   pushes every 5s, so 10s (2 missed cycles) catches a genuinely dead
-  //   BLE link quickly. Only safe now that useBmsPackLive's lastUpdateAt
-  //   advances on every push it actually receives, not just when the
-  //   value differs from the last one - an idle pack (no current, stable
-  //   temps) used to hold an identical reading for a stretch and get
-  //   miscounted as stale even with a live link, which is why this was
-  //   16s -> 60s -> back down to 10s once that root cause was fixed.
-  //   Firebase itself can be reachable while the ESP32/BLE link is dead,
-  //   so connectivity to Firebase alone isn't enough to call it Online.
-  const STALE_AFTER_MS = 10000;
+  // - firebaseConnected: the browser's own Socket.IO connection to our
+  //   backend (see HubDataContext.jsx's socket "connect"/"disconnect") -
+  //   not a real Firebase presence path, just "is our own live-data
+  //   channel up at all" (this name is a holdover from an earlier design).
+  // - fresh data: status genuinely changed within the last 5s. Confirmed
+  //   live (2026-07-27, BLE physically unplugged) that jkbms-bridge.yaml
+  //   stops writing to Firebase entirely when the BLE link drops - the
+  //   value freezes byte-for-byte rather than re-pushing on a heartbeat -
+  //   so a real content change is the correct liveness signal here, not
+  //   "did our backend's 5s poll deliver a message" (it always does,
+  //   frozen data included). 5s is deliberately tight, tighter than the
+  //   ~5s ESP32 push cadence itself, per explicit request to catch a dead
+  //   BLE link fast even at the cost of occasional false positives from a
+  //   pack whose readings hold genuinely steady for a moment.
+  const STALE_AFTER_MS = 5000;
   const isOnline = active.isLive
     ? !!active.firebaseConnected &&
       !!active.lastUpdateAt &&

@@ -43,24 +43,22 @@ export function useBmsPackLive(config) {
   const adminDisabled = !adminEnabled;
   const connected = !!raw && adminEnabled;
 
-  // lastUpdateAt (used for the Online/Offline check) must advance on every
-  // push the socket actually delivers for this device, even when the values
-  // happen to be identical to the previous push - an idle pack (no current,
-  // stable temps) can easily hold the exact same reading across several
-  // ESP32 push cycles, and that's not the same thing as the ESP32/BLE link
-  // being dead. Log/power-history entries stay deduped on a genuine change
-  // below - that's a separate concern (avoid duplicate rows for unchanged
-  // readings), not a proxy for liveness.
-  useEffect(() => {
-    if (!connected) return;
-    setLastUpdateAt(Date.now());
-  }, [status, connected]);
-
+  // lastUpdateAt (used for the Online/Offline check) only advances on a
+  // genuine change to the status JSON - confirmed live (2026-07-27, BLE
+  // physically unplugged) that jkbms-bridge.yaml stops writing to Firebase
+  // entirely when the BLE link drops, rather than re-pushing the last known
+  // values on a heartbeat - so the value really does freeze byte-for-byte
+  // the moment the link dies, and our own 5s backend poll would otherwise
+  // keep re-delivering that frozen snapshot and masking the disconnect
+  // forever. Log/power-history entries share this same dedup (a duplicate
+  // row for an unchanged reading isn't useful either).
   useEffect(() => {
     if (!connected) return;
     const statusJson = JSON.stringify(status);
     if (lastStatusJsonRef.current === statusJson) return;
     lastStatusJsonRef.current = statusJson;
+
+    setLastUpdateAt(Date.now());
 
     const cells = (pick(status, "cellVoltages", "cell_voltages") ?? []).filter((v) => v > 0);
     const chargeMOS = !!pick(status, "charging_state", "charge");
