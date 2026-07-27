@@ -489,16 +489,17 @@ export default function BMSDashboard() {
   // - firebaseConnected: Firebase's own ".info/connected" presence path,
   //   which flips false the moment the SDK's websocket actually times out
   //   or drops (this is the "does Firebase respond" check).
-  // - fresh data: a status push within the last minute. jkbms-bridge.yaml
-  //   pushes every 5s, but useBmsPackLive's lastUpdateAt only reflects real
-  //   pushes it actually received - occasional gaps from BLE retries/WiFi
-  //   jitter/backend hiccups are normal, not a real disconnect. 1 minute
-  //   (~12 missed cycles) is the threshold explicitly asked for, so a
-  //   genuinely dead BLE link still gets caught quickly without flapping on
-  //   every brief stall. Firebase itself can be reachable while the
-  //   ESP32/BLE link is dead, so connectivity to Firebase alone isn't
-  //   enough to call the device Online.
-  const STALE_AFTER_MS = 60000;
+  // - fresh data: a status push within the last 10s. jkbms-bridge.yaml
+  //   pushes every 5s, so 10s (2 missed cycles) catches a genuinely dead
+  //   BLE link quickly. Only safe now that useBmsPackLive's lastUpdateAt
+  //   advances on every push it actually receives, not just when the
+  //   value differs from the last one - an idle pack (no current, stable
+  //   temps) used to hold an identical reading for a stretch and get
+  //   miscounted as stale even with a live link, which is why this was
+  //   16s -> 60s -> back down to 10s once that root cause was fixed.
+  //   Firebase itself can be reachable while the ESP32/BLE link is dead,
+  //   so connectivity to Firebase alone isn't enough to call it Online.
+  const STALE_AFTER_MS = 10000;
   const isOnline = active.isLive
     ? !!active.firebaseConnected &&
       !!active.lastUpdateAt &&
