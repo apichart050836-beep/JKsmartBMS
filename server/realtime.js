@@ -2,23 +2,21 @@ import { Server } from "socket.io";
 import { parse as parseCookie } from "cookie";
 import { COOKIE_NAME, verifySession } from "./auth.js";
 import { allowedHubIds } from "./hubAccess.js";
-import { adminDb, isFirebaseConfigured } from "./firebaseAdmin.js";
-import { readPath, isAdminSdkBroken } from "./firebaseRead.js";
+import { readPath } from "./firebaseRead.js";
 import { isAllowedOrigin } from "./corsOrigin.js";
 
 const REST_POLL_MS = 5000;
-// How long to wait for the Admin SDK's first push before assuming its
-// websocket isn't going to connect at all and switching that ref to REST
-// polling instead. Only matters right after server startup, before any
-// other read has tripped firebaseRead.js's circuit breaker yet - once
-// isAdminSdkBroken() is true, new connections skip straight to polling.
-const PUSH_FALLBACK_MS = 10000;
 
-// Watches a single Firebase path and calls emit(data) whenever it changes.
-// Prefers the Admin SDK's true push, but falls back to REST polling if push
-// hasn't delivered anything within PUSH_FALLBACK_MS (or is already known
-// broken) - on some hosts the RTDB websocket the Admin SDK depends on never
-// completes its handshake even though plain HTTPS reads work fine.
+// Watches a single Firebase path and calls emit(data) whenever a poll
+// delivers something. Always polls via readPath (Admin SDK once()-with-
+// timeout, REST fallback) rather than a persistent adminDb.ref(...).on()
+// listener - .once() reads are proven reliable in this environment
+// (extensively tested), but the one live attempt at a persistent .on()
+// listener broke every subsequent request on that same socket connection
+// (reproduced with a raw curl replay of the Engine.IO handshake: the
+// connect packet succeeds, the very next poll 502s). 5s latency is already
+// the accepted design (matches the 10s offline threshold), so there's
+// nothing lost by not chasing true push here.
 function safeEmit(emit, dataPromise, path) {
   Promise.resolve(emit(dataPromise)).catch((err) => {
     console.error(`watchPath emit failed for ${path}: ${err.message}`);
@@ -26,36 +24,9 @@ function safeEmit(emit, dataPromise, path) {
 }
 
 function watchPath(path, emit) {
-  if (!isFirebaseConfigured || isAdminSdkBroken()) {
-    safeEmit(emit, readPath(path), path);
-    const id = setInterval(() => safeEmit(emit, readPath(path), path), REST_POLL_MS);
-    return () => clearInterval(id);
-  }
-
-  let usingPoll = false;
-  let pollId = null;
-  const ref = adminDb.ref(path);
-  const cb = (snap) => {
-    if (fallbackTimer) {
-      clearTimeout(fallbackTimer);
-      fallbackTimer = null;
-    }
-    safeEmit(emit, Promise.resolve(snap.val()), path);
-  };
-  ref.on("value", cb);
-
-  let fallbackTimer = setTimeout(() => {
-    usingPoll = true;
-    ref.off("value", cb);
-    safeEmit(emit, readPath(path), path);
-    pollId = setInterval(() => safeEmit(emit, readPath(path), path), REST_POLL_MS);
-  }, PUSH_FALLBACK_MS);
-
-  return () => {
-    if (fallbackTimer) clearTimeout(fallbackTimer);
-    if (usingPoll) clearInterval(pollId);
-    else ref.off("value", cb);
-  };
+  safeEmit(emit, readPath(path), path);
+  const id = setInterval(() => safeEmit(emit, readPath(path), path), REST_POLL_MS);
+  return () => clearInterval(id);
 }
 
 // Same role filtering as GET /api/hubs, but live: a non-admin socket only
