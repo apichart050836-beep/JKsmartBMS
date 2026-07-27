@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { ChevronDown, Download } from "lucide-react";
 
 /**
@@ -64,8 +64,16 @@ function OkButton({ saved, onClick }) {
 export function InputOkRow({ label, value, unit, onConfirm, step = "any", pullValue, pullTitle = "Pull current reading" }) {
   const [draft, setDraft] = useState(value);
   const [saved, setSaved] = useState(false);
+  // Guards against the same live-poll race confirmed on DeviceNameRow: the
+  // settings-sync effect re-syncs `value` from Firebase every ~5s
+  // regardless of content, and the unconditional effect below would
+  // silently overwrite an in-progress edit if that poll lands between
+  // typing and clicking OK. Stop re-syncing once the user has actually
+  // typed something, until they save (or this remounts fresh).
+  const editedRef = useRef(false);
 
   useEffect(() => {
+    if (editedRef.current) return;
     setDraft(value);
   }, [value]);
 
@@ -74,6 +82,7 @@ export function InputOkRow({ label, value, unit, onConfirm, step = "any", pullVa
   function confirm() {
     if (draft === "" || Number.isNaN(Number(draft))) return;
     onConfirm(Number(draft));
+    editedRef.current = false;
     setSaved(true);
     setTimeout(() => setSaved(false), 1200);
   }
@@ -91,7 +100,10 @@ export function InputOkRow({ label, value, unit, onConfirm, step = "any", pullVa
             type="number"
             step={step}
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={(e) => {
+              editedRef.current = true;
+              setDraft(e.target.value);
+            }}
             onKeyDown={(e) => e.key === "Enter" && confirm()}
             className="w-16 bg-transparent text-right text-sm text-emerald-700 outline-none tabular-nums"
           />

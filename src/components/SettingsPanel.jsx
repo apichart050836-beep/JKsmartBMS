@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { SlidersHorizontal, ShieldAlert, ArrowLeftRight, Cpu } from "lucide-react";
+import React, { useState, useEffect, useRef } from "react";
+import { SlidersHorizontal, ShieldAlert, ArrowLeftRight, Cpu, Check } from "lucide-react";
 import { Toggle, ToggleRow, InputOkRow, SelectRow, AccordionItem } from "./settings/primitives.jsx";
 import { TRIGGER_LIST, CAN_PROTOCOL_LIST, UART_PROTOCOL_LIST } from "./settings/dataLists.js";
 
@@ -55,12 +55,79 @@ function ColumnLabel({ children }) {
   return <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">{children}</p>;
 }
 
+// Reads/writes settings.my_custom_name (via onSaveDeviceName -> saveSetting
+// "myCustomName", the same REMOTE_SETTINGS_MAP-based path every other
+// Configuration field already uses) - real field, confirmed live against
+// e072a1d6dd18. Text equivalent of InputOkRow's draft/dirty/confirm-flash
+// pattern, just without the number coercion.
+//
+// dirtyRef guards against a real race: BMSDashboard.jsx's settings-sync
+// effect re-syncs `value` from the live Firebase poll every ~5s regardless
+// of whether its content actually changed, unconditionally overwriting
+// `draft` via the effect below - if that lands between the user typing and
+// clicking OK, draft silently reverts to the old value, `dirty` goes
+// false, and (since the OK button was disabled on !dirty) the click did
+// nothing at all with zero feedback. Confirmed live: typed edits were
+// being silently discarded before ever reaching the save call. Once the
+// user has typed something, stop re-syncing from props until they've
+// actually saved (or the modal closes and remounts this component fresh).
+function DeviceNameRow({ value, onSave }) {
+  const [draft, setDraft] = useState(value ?? "");
+  const [saved, setSaved] = useState(false);
+  const editedRef = useRef(false);
+
+  useEffect(() => {
+    if (editedRef.current) return;
+    setDraft(value ?? "");
+  }, [value]);
+
+  const dirty = draft.trim() !== (value ?? "") && draft.trim() !== "";
+
+  function confirm() {
+    const trimmed = draft.trim();
+    if (!trimmed || trimmed === value) return;
+    onSave(trimmed);
+    editedRef.current = false;
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1200);
+  }
+
+  return (
+    <div className="mb-3 flex items-center justify-between gap-3 rounded-xl bg-[var(--muted)] px-3 py-2">
+      <span className="shrink-0 text-xs font-semibold text-[var(--muted-foreground)]">Device name</span>
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          value={draft}
+          onChange={(e) => {
+            editedRef.current = true;
+            setDraft(e.target.value);
+          }}
+          onKeyDown={(e) => e.key === "Enter" && confirm()}
+          placeholder="ตั้งชื่ออุปกรณ์"
+          className={`w-40 rounded-lg border bg-[var(--card)] px-2.5 py-1 text-sm text-[var(--foreground)] outline-none ${
+            dirty ? "border-amber-400" : "border-[var(--border)]"
+          }`}
+        />
+        <button
+          type="button"
+          onClick={confirm}
+          className="rounded-lg bg-[var(--brand)] px-2.5 py-1 text-xs font-semibold text-white transition-opacity hover:opacity-90"
+        >
+          {saved ? <Check className="size-3.5" /> : "OK"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function SettingsPanel({
   settings,
   onSaveSetting,
   liveBatteryVoltage,
   disabled = false,
   customName,
+  onSaveDeviceName,
   batteryType,
   saveError,
   onDismissSaveError,
@@ -88,11 +155,7 @@ export function SettingsPanel({
           </button>
         </div>
       )}
-      {customName && (
-        <p className="mb-3 text-xs text-[var(--muted-foreground)]">
-          Device name: <span className="font-semibold text-[var(--foreground)]">{customName}</span>
-        </p>
-      )}
+      {onSaveDeviceName && <DeviceNameRow value={customName} onSave={onSaveDeviceName} />}
       <div className={disabled ? "pointer-events-none opacity-50" : undefined}>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs text-[var(--muted-foreground)]">Editing this pack's parameters - changes apply immediately.</p>

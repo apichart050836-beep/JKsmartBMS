@@ -62,10 +62,13 @@ export function useBmsPackLive(config) {
     setLastUpdateAt(Date.now());
 
     const cells = (pick(status, "cellVoltages", "cell_voltages") ?? []).filter((v) => v > 0);
-    const chargeMOS = !!pick(status, "charging_state", "charge");
-    const dischargeMOS = !!status.discharge;
     const current = pick(status, "current", "charge_current") ?? 0;
-    const statusLabel = chargeMOS ? "Charging" : dischargeMOS ? "Discharging" : "Standby";
+    // charging_state/discharge are MOSFET enable switches, not live
+    // direction - both can read true simultaneously while genuinely
+    // charging (confirmed earlier this session), so the real signed
+    // current is the only trustworthy source for which way power is
+    // actually flowing right now.
+    const statusLabel = current > 0 ? "Charging" : current < 0 ? "Discharging" : "Standby";
     const tempVals = [status.battery_t1, status.battery_t2, status.mos_temp].filter((v) => typeof v === "number");
     const avgTemp = tempVals.length ? tempVals.reduce((a, b) => a + b, 0) / tempVals.length : 0;
     const now = new Date();
@@ -111,7 +114,9 @@ export function useBmsPackLive(config) {
   const dischargeMOS = !!status.discharge;
   const power = pick(status, "power", "battery_power") ?? 0;
   const current = pick(status, "current", "charge_current") ?? 0;
-  const statusLabel = chargeMOS ? "Charging" : dischargeMOS ? "Discharging" : "Standby";
+  // Same real-current-sign basis as the log entries above - not the
+  // charging_state/discharge MOSFET enable switches.
+  const statusLabel = current > 0 ? "Charging" : current < 0 ? "Discharging" : "Standby";
 
   const ratedCapacityAh = status.nominal_capacity || fallbackCapacityAh;
   const remainingAh = status.capacity_remain ?? 0;

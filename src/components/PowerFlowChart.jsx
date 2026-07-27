@@ -13,12 +13,12 @@ export function PowerFlowChart({
     chargedWh = 0,
     dischargedWh = 0,
     socPercent = 0,
+    remainingRuntime,
     history = [],
 }) {
     // 1. คำนวณ Power Realtime (P = V * I)
     const rawPowerW = packVoltage * current;
     const absPowerW = Math.abs(rawPowerW);
-    const powerKw = (absPowerW / 1000).toFixed(2);
 
     // 2. กำหนดสถานะ Flow (Charge > 0.1A, Discharge < -0.1A, Idle)
     const isCharging = current > 0.1;
@@ -102,12 +102,19 @@ export function PowerFlowChart({
                 {/* Card 2: Main Power Hub Center */}
                 <div className="flex flex-col justify-between rounded-xl bg-[var(--card)] p-4 ring-1 ring-[var(--border)]">
                     <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold text-[var(--muted-foreground)]">Instantaneous Power</span>
+                        <span className="text-xs font-semibold text-[var(--muted-foreground)]">Remaining Runtime</span>
                         <Activity className="size-4 text-[var(--brand)]" />
                     </div>
                     <div className="my-2 text-center">
-                        <div className="text-3xl font-extrabold text-[var(--foreground)] tabular-nums">
-                            {powerKw} <span className="text-base font-medium text-[var(--muted-foreground)]">kW</span>
+                        <div
+                            className={`text-2xl font-extrabold tabular-nums ${remainingRuntime?.state === "charging"
+                                    ? "text-emerald-500"
+                                    : remainingRuntime?.state === "standby"
+                                        ? "text-[var(--muted-foreground)]"
+                                        : "text-[var(--foreground)]"
+                                }`}
+                        >
+                            {remainingRuntime?.label ?? "-"}
                         </div>
                         <div className="text-xs text-[var(--muted-foreground)] tabular-nums">
                             {absPowerW.toFixed(0)} Watts @ {packVoltage.toFixed(2)}V
