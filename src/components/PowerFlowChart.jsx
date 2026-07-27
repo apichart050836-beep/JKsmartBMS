@@ -109,7 +109,9 @@ export function PowerFlowChart({
                                     ? "text-emerald-500"
                                     : remainingRuntime?.state === "standby"
                                         ? "text-[var(--muted-foreground)]"
-                                        : "text-[var(--foreground)]"
+                                        : remainingRuntime?.state === "discharging"
+                                            ? "text-amber-500"
+                                            : "text-[var(--foreground)]"
                                 }`}
                         >
                             {remainingRuntime?.label ?? "-"}
