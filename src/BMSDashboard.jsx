@@ -490,17 +490,20 @@ export default function BMSDashboard() {
   //   backend (see HubDataContext.jsx's socket "connect"/"disconnect") -
   //   not a real Firebase presence path, just "is our own live-data
   //   channel up at all" (this name is a holdover from an earlier design).
-  // - fresh data: status genuinely changed within the last 5s. Confirmed
+  // - fresh data: status genuinely changed within the last 15s. Confirmed
   //   live (2026-07-27, BLE physically unplugged) that jkbms-bridge.yaml
   //   stops writing to Firebase entirely when the BLE link drops - the
   //   value freezes byte-for-byte rather than re-pushing on a heartbeat -
   //   so a real content change is the correct liveness signal here, not
   //   "did our backend's 5s poll deliver a message" (it always does,
-  //   frozen data included). 5s is deliberately tight, tighter than the
-  //   ~5s ESP32 push cadence itself, per explicit request to catch a dead
-  //   BLE link fast even at the cost of occasional false positives from a
-  //   pack whose readings hold genuinely steady for a moment.
-  const STALE_AFTER_MS = 5000;
+  //   frozen data included). This is purely the Offline-detection
+  //   threshold - the displayed values themselves still refresh as fast
+  //   as the data can move: the backend polls Firebase every 5s
+  //   (realtime.js's REST_POLL_MS), matching jkbms-bridge.yaml's own ~5s
+  //   push cadence, so there's nothing more real-time to extract there.
+  //   15s just gives the offline call itself more room (3 missed poll
+  //   cycles) before declaring a dead BLE link, per request.
+  const STALE_AFTER_MS = 15000;
   const isOnline = active.isLive
     ? !!active.firebaseConnected &&
       !!active.lastUpdateAt &&
