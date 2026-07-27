@@ -25,6 +25,7 @@ export function SystemHero({
     ratedCapacityAh = 50,
     remainingAh = 0,
     socPercent = 0,
+    remainingRuntime,
     cellAvgVoltage = 0,
     soh = 100,
     chargedAh = 0,
@@ -154,6 +155,22 @@ export function SystemHero({
                             />
                         </div>
                     </div>
+
+                    {remainingRuntime && (
+                        <div className="mt-2 flex items-center justify-between border-t border-[var(--border)]/80 pt-2 text-xs">
+                            <span className="font-semibold text-[var(--muted-foreground)]">Remaining Runtime</span>
+                            <span
+                                className={`font-bold tabular-nums ${remainingRuntime.state === "charging"
+                                        ? "text-emerald-500"
+                                        : remainingRuntime.state === "standby"
+                                            ? "text-[var(--muted-foreground)]"
+                                            : "text-[var(--foreground)]"
+                                    }`}
+                            >
+                                {remainingRuntime.label}
+                            </span>
+                        </div>
+                    )}
                 </div>
 
                 {/* ========================================================= */}

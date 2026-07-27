@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo, useRef } from "react";
 import { voltDiffTone, tempTone } from "../lib/tone.js";
 import { pick } from "../lib/pick.js";
+import { computeRemainingRuntime } from "../lib/remainingRuntime.js";
 import { useHubData } from "../context/HubDataContext.jsx";
 
 const POWER_HISTORY_LEN = 30;
@@ -114,6 +115,7 @@ export function useBmsPackLive(config) {
 
   const ratedCapacityAh = status.nominal_capacity || fallbackCapacityAh;
   const remainingAh = status.capacity_remain ?? 0;
+  const soc = pick(status, "soc", "percent_remain") ?? 0;
   const cycleAh = status.cycle_capacity ?? 0;
   const cycleCount = status.cycle_count ?? 0;
   const soh = pick(status, "state_of_health", "primaryHealth") ?? 100;
@@ -151,6 +153,23 @@ export function useBmsPackLive(config) {
   const vd = voltDiffTone(voltDiffMv);
   const tt = tempTone(maxTemp);
 
+  // Raw (non-defaulted) reads for computeRemainingRuntime - it needs to
+  // distinguish "field genuinely missing" (fall back to the SOC-derived Ah
+  // or the Ah/A formula) from "field present and 0", which the `?? 0`
+  // fallbacks already applied to remainingAh/power above would erase.
+  const remainingRuntime = useMemo(
+    () =>
+      computeRemainingRuntime({
+        current,
+        power: pick(status, "power", "battery_power"),
+        remainingCapacityAh: status.capacity_remain,
+        ratedCapacityAh,
+        soc,
+        voltage: packVoltage,
+      }),
+    [current, status, ratedCapacityAh, soc, packVoltage]
+  );
+
   return {
     id,
     name,
@@ -163,7 +182,7 @@ export function useBmsPackLive(config) {
     info,
     remoteSettings,
     ratedCapacityAh,
-    soc: pick(status, "soc", "percent_remain") ?? 0,
+    soc,
     soh,
     dailyChargeAh,
     dailyChargeKwh,
@@ -191,6 +210,7 @@ export function useBmsPackLive(config) {
     minIdx,
     voltDiffMv,
     remainingAh,
+    remainingRuntime,
     avgTemp,
     maxTemp,
     status: statusLabel,

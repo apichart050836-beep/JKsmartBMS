@@ -594,6 +594,7 @@ export default function BMSDashboard() {
               packVoltage={active.packVoltage}
               ratedCapacityAh={effectiveCapacityAh}
               remainingAh={active.remainingAh}
+              remainingRuntime={active.remainingRuntime}
               socPercent={displaySoc}
               cellAvgVoltage={active.cells.length ? active.cells.reduce((a, b) => a + b, 0) / active.cells.length : 0}
               soh={active.soh}
