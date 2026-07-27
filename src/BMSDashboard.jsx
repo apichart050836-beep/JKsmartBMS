@@ -514,11 +514,12 @@ export default function BMSDashboard() {
   // charge (Ah) a pack holds.
   const effectiveCapacityAh = settings.capacityAh;
   const displaySoc = clamp((active.remainingAh / effectiveCapacityAh) * 100, 0, 100);
-  // Recommended charge/discharge current: 0.3C of rated capacity, per
-  // request - a conservative, chemistry-agnostic rate of thumb rather than
-  // a per-cell datasheet limit (the app doesn't have per-cell datasheet
-  // data to work from).
-  const recommendedCurrentA = effectiveCapacityAh * 0.3;
+  // Recommended charge/discharge current: 0.25C / 0.5C of rated capacity
+  // respectively, per request - a conservative, chemistry-agnostic rule of
+  // thumb rather than a per-cell datasheet limit (the app doesn't have
+  // per-cell datasheet data to work from).
+  const recommendedChargeCurrentA = effectiveCapacityAh * 0.25;
+  const recommendedDischargeCurrentA = effectiveCapacityAh * 0.5;
 
   const balDeltaVolt = settings.balDeltaVolt;
   const vd = voltDiffToneWithThreshold(active.voltDiffMv, balDeltaVolt);
@@ -701,7 +702,8 @@ export default function BMSDashboard() {
                socPercent={displaySoc}
                remainingRuntime={active.remainingRuntime}
                timeToFullCharge={active.timeToFullCharge}
-               recommendedCurrentA={recommendedCurrentA}
+               recommendedChargeCurrentA={recommendedChargeCurrentA}
+               recommendedDischargeCurrentA={recommendedDischargeCurrentA}
                history={active.powerHistory}
              />
                                       </div>

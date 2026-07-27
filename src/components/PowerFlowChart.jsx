@@ -15,7 +15,8 @@ export function PowerFlowChart({
     socPercent = 0,
     remainingRuntime,
     timeToFullCharge,
-    recommendedCurrentA,
+    recommendedChargeCurrentA,
+    recommendedDischargeCurrentA,
     history = [],
 }) {
     // 1. คำนวณ Power Realtime (P = V * I)
@@ -96,6 +97,14 @@ export function PowerFlowChart({
                             {chargedAh.toFixed(1)} Ah ({(chargedWh / 1000).toFixed(2)} kWh)
                         </span>
                     </div>
+                    {typeof recommendedChargeCurrentA === "number" && (
+                        <div className="mt-1.5 flex justify-between text-[11px] text-[var(--muted-foreground)]">
+                            <span>แนะนำไม่เกิน (0.25C)</span>
+                            <span className="font-semibold text-[var(--foreground)] tabular-nums">
+                                {recommendedChargeCurrentA.toFixed(1)} A
+                            </span>
+                        </div>
+                    )}
                 </div>
 
                 {/* Card 2: Main Power Hub Center */}
@@ -136,14 +145,6 @@ export function PowerFlowChart({
                             {timeToFullCharge?.label ?? "-"}
                         </div>
                     </div>
-                    {typeof recommendedCurrentA === "number" && (
-                        <div className="flex items-center justify-between border-t border-[var(--border)]/60 pt-2 text-[11px] text-[var(--muted-foreground)]">
-                            <span>แนะนำกระแสชาร์จ/ใช้ (0.3C)</span>
-                            <span className="font-semibold text-[var(--foreground)] tabular-nums">
-                                ไม่เกิน {recommendedCurrentA.toFixed(1)} A
-                            </span>
-                        </div>
-                    )}
                 </div>
 
                 {/* Card 3: Discharge Outflow (-) */}
@@ -172,6 +173,14 @@ export function PowerFlowChart({
                             {dischargedAh.toFixed(1)} Ah ({(dischargedWh / 1000).toFixed(2)} kWh)
                         </span>
                     </div>
+                    {typeof recommendedDischargeCurrentA === "number" && (
+                        <div className="mt-1.5 flex justify-between text-[11px] text-[var(--muted-foreground)]">
+                            <span>แนะนำไม่เกิน (0.5C)</span>
+                            <span className="font-semibold text-[var(--foreground)] tabular-nums">
+                                {recommendedDischargeCurrentA.toFixed(1)} A
+                            </span>
+                        </div>
+                    )}
                 </div>
             </div>
         </section>

@@ -104,7 +104,7 @@ export function TopBar({
                         }`}
                 >
                     <Settings className="size-3.5" />
-                    <span>Configuration</span>
+                    <span>Config</span>
                 </button>
 
                 {/* Dark Mode Toggle (Circular Style, matches Logout) */}
