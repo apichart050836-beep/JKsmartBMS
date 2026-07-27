@@ -90,7 +90,7 @@ export function TopBar({
                     className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-[var(--card)] px-3.5 py-2 text-xs font-semibold text-[var(--foreground)] ring-1 ring-[var(--border)] shadow-xs transition-all duration-150 hover:bg-[var(--muted)] active:scale-95"
                 >
                     <ClipboardList className="size-3.5 text-[var(--muted-foreground)]" />
-                    <span>System Log</span>
+                    <span>Log</span>
                 </button>
 
                 {/* Configuration Button */}
