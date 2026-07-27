@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo, useRef } from "react";
 import { voltDiffTone, tempTone } from "../lib/tone.js";
 import { pick } from "../lib/pick.js";
 import { computeRemainingRuntime, computeTimeToFullCharge } from "../lib/remainingRuntime.js";
+import { computeSoh } from "../lib/soh.js";
 import { useHubData } from "../context/HubDataContext.jsx";
 
 const POWER_HISTORY_LEN = 30;
@@ -123,7 +124,19 @@ export function useBmsPackLive(config) {
   const soc = pick(status, "soc", "percent_remain") ?? 0;
   const cycleAh = status.cycle_capacity ?? 0;
   const cycleCount = status.cycle_count ?? 0;
-  const soh = pick(status, "state_of_health", "primaryHealth") ?? 100;
+  // Self-calculated (see soh.js) - replaces the BMS's own reported
+  // state_of_health per explicit request, rather than just displaying it.
+  const sohResult = useMemo(
+    () =>
+      computeSoh({
+        capacityRemainAh: status.capacity_remain,
+        socPercent: pick(status, "soc", "percent_remain"),
+        designCapacityAh: ratedCapacityAh,
+        cycleCount: status.cycle_count,
+      }),
+    [status, ratedCapacityAh]
+  );
+  const soh = sohResult.soh ?? 100;
   const dailyChargeAh = status.dailyChargeAh ?? 0;
   const dailyChargeKwh = status.dailyChargeKwh ?? 0;
   const dailyDischargeAh = status.dailyDischargeAh ?? 0;
@@ -201,6 +214,7 @@ export function useBmsPackLive(config) {
     ratedCapacityAh,
     soc,
     soh,
+    sohBreakdown: sohResult,
     dailyChargeAh,
     dailyChargeKwh,
     dailyDischargeAh,
