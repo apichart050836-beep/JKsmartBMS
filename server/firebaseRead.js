@@ -19,21 +19,35 @@ function withTimeout(promise, label) {
   ]);
 }
 
+async function readRest(path) {
+  const res = await fetch(`${REST_BASE}/${path}.json`);
+  if (!res.ok) throw new Error(`Firebase REST read failed for ${path}: ${res.status}`);
+  return res.json();
+}
+
 // Read-only. Prefers the privileged Admin SDK (adminDb) when the service
 // account key is present; falls back to the plain public REST endpoint
 // otherwise (real project's Security Rules currently allow public read on
-// most paths - confirmed live). Writes never go through this path - they
+// most paths - confirmed live), AND also falls back to REST if the Admin
+// SDK read itself times out - on some hosts the RTDB websocket the Admin
+// SDK depends on stalls even though plain HTTPS to the same database works
+// fine, so a slow/broken Admin SDK connection degrades to REST instead of
+// surfacing as a failed read. Writes never go through this path - they
 // stay gated behind requireFirebase/adminDb-only, since REST writes to a
 // real production database aren't something to attempt without the
 // privileged key confirming what's actually allowed.
 export async function readPath(path) {
   if (isFirebaseConfigured) {
-    const snap = await withTimeout(adminDb.ref(path).once("value"), path);
-    return snap.val();
+    try {
+      const snap = await withTimeout(adminDb.ref(path).once("value"), path);
+      return snap.val();
+    } catch (err) {
+      if (!REST_BASE) throw err;
+      console.warn(`Admin SDK read failed for ${path} (${err.message}), falling back to REST`);
+      return readRest(path);
+    }
   }
-  const res = await fetch(`${REST_BASE}/${path}.json`);
-  if (!res.ok) throw new Error(`Firebase REST read failed for ${path}: ${res.status}`);
-  return res.json();
+  return readRest(path);
 }
 
 // True once there's SOME way to read Firebase (Admin SDK or public REST) -
