@@ -3,6 +3,7 @@ import { LayoutDashboard, ShieldCheck, LogOut } from "lucide-react";
 import BMSDashboard from "./BMSDashboard.jsx";
 import AdminMonitor from "./AdminMonitor.jsx";
 import Login from "./Login.jsx";
+import HomePage from "./HomePage.jsx";
 import { ThemeRoot } from "./components/ThemeRoot.jsx";
 import { ThemeProvider } from "./context/ThemeContext.jsx";
 import { AuthProvider, useAuth } from "./context/AuthContext.jsx";
@@ -90,10 +91,17 @@ function AuthedApp() {
 
 function Gate() {
   const { isAuthenticated, loading } = useAuth();
+  // Unauthenticated visitors land on the marketing HomePage first, not
+  // straight on the login form - "เข้าสู่ระบบ"/"เริ่มต้นใช้งาน" there switch
+  // to Login. Resets to the HomePage on logout (this is state, not a route)
+  // so a fresh visit always starts from the same place.
+  const [showLogin, setShowLogin] = useState(false);
+
   if (loading) {
     return <div className="flex min-h-screen items-center justify-center text-sm text-[var(--muted-foreground)]" />;
   }
-  return isAuthenticated ? <AuthedApp /> : <Login />;
+  if (isAuthenticated) return <AuthedApp />;
+  return showLogin ? <Login /> : <HomePage onGoToLogin={() => setShowLogin(true)} />;
 }
 
 export default function App() {
