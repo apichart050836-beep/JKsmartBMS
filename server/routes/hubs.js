@@ -2,8 +2,7 @@ import { Router } from "express";
 import { requireAuth } from "../middleware/requireAuth.js";
 import { requireFirebase } from "../middleware/requireFirebase.js";
 import { allowedHubIds, canAccessHub } from "../hubAccess.js";
-import { adminDb } from "../firebaseAdmin.js";
-import { readPath } from "../firebaseRead.js";
+import { readPath, writePath } from "../firebaseRead.js";
 
 const router = Router();
 
@@ -51,7 +50,8 @@ router.get("/", requireAuth, async (req, res) => {
 // owns everything, a 'user' role must own that exact hub. This is what
 // BMSDashboard.jsx's saveSetting/saveDeviceName call instead of writing to
 // Firebase directly from the browser. Always requires the real Admin SDK
-// key - writes never go through the public REST fallback.
+// key - writePath() falls back to an authenticated REST PUT if the Admin
+// SDK's own write hangs, but never to an anonymous/public write.
 router.patch("/:hubId/settings", requireAuth, requireFirebase, async (req, res) => {
   const { hubId } = req.params;
   const { bmsKey, key, value } = req.body ?? {};
@@ -61,8 +61,13 @@ router.patch("/:hubId/settings", requireAuth, requireFirebase, async (req, res) 
   if ((bmsKey !== undefined && bmsKey !== null && !isSafeKey(bmsKey)) || !isSafeKey(key)) {
     return res.status(400).json({ error: "Invalid request" });
   }
-  await adminDb.ref(`${devicePath(hubId, bmsKey)}/settings/${key}`).set(value);
-  res.json({ ok: true });
+  try {
+    await writePath(`${devicePath(hubId, bmsKey)}/settings/${key}`, value);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(`PATCH /api/hubs/${hubId}/settings failed: ${err.message}`);
+    res.status(503).json({ error: "Could not save setting" });
+  }
 });
 
 router.patch("/:hubId/device-name", requireAuth, requireFirebase, async (req, res) => {
@@ -74,8 +79,13 @@ router.patch("/:hubId/device-name", requireAuth, requireFirebase, async (req, re
   if (bmsKey !== undefined && bmsKey !== null && !isSafeKey(bmsKey)) {
     return res.status(400).json({ error: "Invalid request" });
   }
-  await adminDb.ref(`${devicePath(hubId, bmsKey)}/info/my_bms_custom_name`).set(name);
-  res.json({ ok: true });
+  try {
+    await writePath(`${devicePath(hubId, bmsKey)}/info/my_bms_custom_name`, name);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(`PATCH /api/hubs/${hubId}/device-name failed: ${err.message}`);
+    res.status(503).json({ error: "Could not save device name" });
+  }
 });
 
 export default router;

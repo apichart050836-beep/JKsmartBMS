@@ -2,7 +2,7 @@ import { Router } from "express";
 import { requireAuth } from "../middleware/requireAuth.js";
 import { requireRole } from "../middleware/requireRole.js";
 import { requireFirebase } from "../middleware/requireFirebase.js";
-import { adminDb } from "../firebaseAdmin.js";
+import { writePath } from "../firebaseRead.js";
 
 const router = Router();
 router.use(requireAuth, requireRole("admin"), requireFirebase);
@@ -27,8 +27,13 @@ router.patch("/hub-device/enabled", async (req, res) => {
   if (!isSafeKey(hubId) || (bmsKey !== undefined && !isSafeKey(bmsKey)) || typeof enabled !== "boolean") {
     return res.status(400).json({ error: "Invalid request" });
   }
-  await adminDb.ref(`${devicePath(hubId, bmsKey)}/admin/enabled`).set(enabled);
-  res.json({ ok: true });
+  try {
+    await writePath(`${devicePath(hubId, bmsKey)}/admin/enabled`, enabled);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(`PATCH /api/admin/hub-device/enabled failed: ${err.message}`);
+    res.status(503).json({ error: "Could not save setting" });
+  }
 });
 
 router.patch("/hub-device/expiration", async (req, res) => {
@@ -36,8 +41,13 @@ router.patch("/hub-device/expiration", async (req, res) => {
   if (!isSafeKey(hubId) || (bmsKey !== undefined && !isSafeKey(bmsKey))) {
     return res.status(400).json({ error: "Invalid request" });
   }
-  await adminDb.ref(`${devicePath(hubId, bmsKey)}/admin/expirationDate`).set(expirationDate || null);
-  res.json({ ok: true });
+  try {
+    await writePath(`${devicePath(hubId, bmsKey)}/admin/expirationDate`, expirationDate || null);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(`PATCH /api/admin/hub-device/expiration failed: ${err.message}`);
+    res.status(503).json({ error: "Could not save setting" });
+  }
 });
 
 export default router;

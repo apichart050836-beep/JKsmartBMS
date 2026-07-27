@@ -1,4 +1,4 @@
-import { adminDb, isFirebaseConfigured } from "./firebaseAdmin.js";
+import { adminDb, isFirebaseConfigured, getAccessToken } from "./firebaseAdmin.js";
 
 const REST_BASE = process.env.FIREBASE_DATABASE_URL;
 
@@ -44,10 +44,7 @@ export function isAdminSdkBroken() {
 // SDK read itself times out - on some hosts the RTDB websocket the Admin
 // SDK depends on stalls even though plain HTTPS to the same database works
 // fine, so a slow/broken Admin SDK connection degrades to REST instead of
-// surfacing as a failed read. Writes never go through this path - they
-// stay gated behind requireFirebase/adminDb-only, since REST writes to a
-// real production database aren't something to attempt without the
-// privileged key confirming what's actually allowed.
+// surfacing as a failed read.
 export async function readPath(path) {
   if (isFirebaseConfigured && !adminSdkBroken) {
     try {
@@ -61,6 +58,37 @@ export async function readPath(path) {
     }
   }
   return readRest(path);
+}
+
+async function writeRest(path, value) {
+  const token = await getAccessToken();
+  const res = await fetch(`${REST_BASE}/${path}.json`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(value ?? null),
+  });
+  if (!res.ok) throw new Error(`Firebase REST write failed for ${path}: ${res.status}`);
+}
+
+// Writes always require the privileged key (requireFirebase gates every
+// route that calls this - there's no anonymous-REST-write fallback the way
+// reads have one). Still needs its own escape from the Admin SDK's RTDB
+// transport though, since that's the same connection reads had to fall
+// back away from - an authenticated REST PUT (Bearer token minted from the
+// same service account, see firebaseAdmin.js's getAccessToken) goes over
+// plain HTTPS instead, sidestepping whatever specifically breaks that
+// websocket handshake on this host.
+export async function writePath(path, value) {
+  if (!adminSdkBroken) {
+    try {
+      await withTimeout(adminDb.ref(path).set(value), path);
+      return;
+    } catch (err) {
+      adminSdkBroken = true;
+      console.warn(`Admin SDK write failed for ${path} (${err.message}) - switching to REST for the rest of this process`);
+    }
+  }
+  await writeRest(path, value);
 }
 
 // True once there's SOME way to read Firebase (Admin SDK or public REST) -

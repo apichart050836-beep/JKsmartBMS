@@ -44,11 +44,23 @@ if (!isFirebaseConfigured) {
   );
 }
 
+const credential = isFirebaseConfigured ? cert(serviceAccount) : null;
+
 export const adminDb = isFirebaseConfigured
   ? getDatabase(
       initializeApp({
-        credential: cert(serviceAccount),
+        credential,
         databaseURL: process.env.FIREBASE_DATABASE_URL,
       })
     )
   : null;
+
+// Lets firebaseRead.js's REST write fallback authenticate as this same
+// service account over plain HTTPS instead of the Admin SDK's own RTDB
+// transport (whose websocket connection has been confirmed to hang on
+// Render) - reuses the credential already built above rather than a
+// second one.
+export async function getAccessToken() {
+  const { access_token } = await credential.getAccessToken();
+  return access_token;
+}
