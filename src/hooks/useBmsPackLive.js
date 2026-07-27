@@ -43,17 +43,24 @@ export function useBmsPackLive(config) {
   const adminDisabled = !adminEnabled;
   const connected = !!raw && adminEnabled;
 
-  // Log/power-history entries should only be appended on a genuine change to
-  // THIS device's status - the context's `hubs` object reference changes on
-  // every socket event for the whole hub (siblings included), not just when
-  // this specific device's data actually differs.
+  // lastUpdateAt (used for the Online/Offline check) must advance on every
+  // push the socket actually delivers for this device, even when the values
+  // happen to be identical to the previous push - an idle pack (no current,
+  // stable temps) can easily hold the exact same reading across several
+  // ESP32 push cycles, and that's not the same thing as the ESP32/BLE link
+  // being dead. Log/power-history entries stay deduped on a genuine change
+  // below - that's a separate concern (avoid duplicate rows for unchanged
+  // readings), not a proxy for liveness.
+  useEffect(() => {
+    if (!connected) return;
+    setLastUpdateAt(Date.now());
+  }, [status, connected]);
+
   useEffect(() => {
     if (!connected) return;
     const statusJson = JSON.stringify(status);
     if (lastStatusJsonRef.current === statusJson) return;
     lastStatusJsonRef.current = statusJson;
-
-    setLastUpdateAt(Date.now());
 
     const cells = (pick(status, "cellVoltages", "cell_voltages") ?? []).filter((v) => v > 0);
     const chargeMOS = !!pick(status, "charging_state", "charge");
