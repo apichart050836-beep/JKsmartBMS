@@ -19,7 +19,17 @@ migrate();
 startTelemetryLogger();
 
 const app = express();
+// Scoped to /api only - the built frontend is served same-origin from this
+// same process (see express.static below), and same-origin requests for
+// module scripts/stylesheets still carry a crossorigin attribute (Vite's
+// default for type="module"), which makes browsers send an Origin header
+// even though it's not actually cross-origin. A global CORS check rejected
+// those (Origin didn't match localhost or CLIENT_ORIGIN), breaking every
+// production load. CORS only needs to gate the API, which is the only
+// thing ever called cross-origin (e.g. a local Vite dev frontend hitting a
+// deployed backend).
 app.use(
+  "/api",
   cors({
     origin(origin, callback) {
       if (isAllowedOrigin(origin)) return callback(null, true);

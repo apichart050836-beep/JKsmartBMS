@@ -9,6 +9,17 @@
 // agree - this bug already recurred once from the two being defined separately.
 const LOCALHOST_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 
+// RENDER_EXTERNAL_URL is auto-populated by Render for every web service (the
+// live https://<name>.onrender.com URL) - using it means the deployed
+// frontend's own same-origin requests (module scripts/stylesheets with a
+// crossorigin attribute, and the Socket.IO handshake, both of which send an
+// Origin header even though they're same-origin) are allowed without the
+// user needing to manually set anything in the Render dashboard.
 export function isAllowedOrigin(origin) {
-  return !origin || LOCALHOST_ORIGIN.test(origin) || origin === process.env.CLIENT_ORIGIN;
+  return (
+    !origin ||
+    LOCALHOST_ORIGIN.test(origin) ||
+    origin === process.env.CLIENT_ORIGIN ||
+    origin === process.env.RENDER_EXTERNAL_URL
+  );
 }
