@@ -10,6 +10,23 @@ import {
 import { statusTone } from "../lib/tone.js";
 import { ElectricGauge } from "../ElectricGauge.jsx";
 
+// Matches batteryHealthScore.js's 5 rating tiers - Excellent=green,
+// Very Good=light green, Good=yellow, Fair=orange, Poor=red.
+const HEALTH_TONE_TEXT = {
+    excellent: "text-emerald-600",
+    "very-good": "text-emerald-400",
+    good: "text-yellow-500",
+    fair: "text-orange-500",
+    poor: "text-rose-500",
+};
+const HEALTH_TONE_BG = {
+    excellent: "bg-emerald-600",
+    "very-good": "bg-emerald-400",
+    good: "bg-yellow-500",
+    fair: "bg-orange-500",
+    poor: "bg-rose-500",
+};
+
 export function SystemHero({
     deviceLabel,
     hubAccount,
@@ -156,22 +173,18 @@ export function SystemHero({
                         </div>
                     </div>
 
-                    {healthScore != null && (
+                    {healthScore?.score != null && (
                         <div className="mt-2 border-t border-[var(--border)]/80 pt-2">
                             <div className="mb-1 flex items-center justify-between text-xs">
                                 <span className="font-semibold text-[var(--muted-foreground)]">Battery Health Score</span>
-                                <span
-                                    className={`font-bold tabular-nums ${healthScore >= 80 ? "text-emerald-500" : healthScore >= 50 ? "text-amber-500" : "text-rose-500"
-                                        }`}
-                                >
-                                    {healthScore}/100
+                                <span className={`font-bold tabular-nums ${HEALTH_TONE_TEXT[healthScore.tone] ?? "text-[var(--foreground)]"}`}>
+                                    {healthScore.score}/100 · {healthScore.rating}
                                 </span>
                             </div>
                             <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--border)]">
                                 <div
-                                    className={`h-full rounded-full transition-all duration-500 ${healthScore >= 80 ? "bg-emerald-500" : healthScore >= 50 ? "bg-amber-500" : "bg-rose-500"
-                                        }`}
-                                    style={{ width: `${Math.min(Math.max(healthScore, 0), 100)}%` }}
+                                    className={`h-full rounded-full transition-all duration-500 ${HEALTH_TONE_BG[healthScore.tone] ?? "bg-[var(--muted-foreground)]"}`}
+                                    style={{ width: `${Math.min(Math.max(healthScore.score, 0), 100)}%` }}
                                 />
                             </div>
                         </div>

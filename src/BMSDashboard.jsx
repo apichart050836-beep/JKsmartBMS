@@ -290,7 +290,7 @@ function Pill({ tone = "brand", icon: Icon, children }) {
 // Main dashboard
 // ---------------------------------------------------------------------------
 
-export default function BMSDashboard() {
+export default function BMSDashboard({ onSoftwareVersionChange }) {
   const { logout } = useAuth();
   const [now, setNow] = useState(new Date());
   // Persisted across refreshes - slot ids are stable/positional (see
@@ -350,6 +350,12 @@ export default function BMSDashboard() {
   const packs = [bms0, bms1, bms2, bms3, bms4, bms5,bms6,bms7,bms8,bms9];
   const active = packs.find((p) => p.id === activeBmsId) ?? packs[0];
   const activeConfig = slots.find((b) => b.id === activeBmsId) ?? slots[0];
+
+  // Reports the active device's version up to App.jsx, which renders the
+  // badge next to the "Dashboard" nav pill (outside this component).
+  useEffect(() => {
+    onSoftwareVersionChange?.(active.info?.software_version ?? null);
+  }, [active.info?.software_version, onSoftwareVersionChange]);
 
   // ESP32 firmware version - real field (info.software_version), same
   // object already used for battery_type elsewhere. There's no dedicated
@@ -536,16 +542,19 @@ export default function BMSDashboard() {
   // Discharge OTP limit - matches which protection would actually trip.
   const otpLimit = active.status === "Charging" ? settings.chgOtp : settings.dsgOtp;
 
-  // Weighted composite (SOH 50% / cell imbalance 25% / temperature 15% /
-  // wire resistance spread 10%) - see batteryHealthScore.js. Reuses the
-  // same real otpLimit the Temperature card already shows, so "hot" means
-  // the same thing in both places.
+  // 5-factor composite (SOC range 40 / cell balance 20 / temperature 20 /
+  // alarm-fault 10 / current 10) - see batteryHealthScore.js for the exact
+  // per-factor breakpoints. Reuses activeAlarms (the same live threshold
+  // panel already shows) and the BMS's own configured current limits, not
+  // app-invented thresholds.
   const healthScore = computeBatteryHealthScore({
-    soh: active.soh,
+    soc: displaySoc,
     voltDiffMv: active.voltDiffMv,
     maxTemp: active.maxTemp,
-    otpThreshold: otpLimit || 70,
-    wireResistances: active.wireResistances,
+    alarms: activeAlarms,
+    current: active.current,
+    contChgCurr: settings.contChgCurr,
+    contDsgCurr: settings.contDsgCurr,
   });
 
   // Fill bar is scaled against the actual UVP-OVP protection window, not the
@@ -635,8 +644,6 @@ export default function BMSDashboard() {
         <TopBar
           tabs={slots.filter((s) => s.live).map((s) => ({ id: s.id, name: s.name, mac: s.deviceKey }))}
           activeBmsId={activeBmsId}
-          softwareVersion={active.info?.software_version}
-          hardwareVersion={active.info?.hardware_version}
           onSelectBms={setActiveBmsId}
           onOpenLog={() => setShowLog(true)}
           onOpenConfig={() => setShowConfig(true)}
@@ -676,7 +683,7 @@ export default function BMSDashboard() {
               socPercent={displaySoc}
               cellAvgVoltage={active.cells.length ? active.cells.reduce((a, b) => a + b, 0) / active.cells.length : 0}
               soh={active.soh}
-              healthScore={healthScore.score}
+              healthScore={healthScore}
               chargedAh={activeEnergy.chargedAh}
               dischargedAh={activeEnergy.dischargedAh}
               chargeMOS={chargeMOS}

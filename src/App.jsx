@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { LayoutDashboard, ShieldCheck, LogOut } from "lucide-react";
+import { LayoutDashboard, ShieldCheck, LogOut, Cpu } from "lucide-react";
 import BMSDashboard from "./BMSDashboard.jsx";
 import AdminMonitor from "./AdminMonitor.jsx";
 import Login from "./Login.jsx";
@@ -9,6 +9,11 @@ import { ThemeProvider } from "./context/ThemeContext.jsx";
 import { AuthProvider, useAuth } from "./context/AuthContext.jsx";
 import { HubDataProvider } from "./context/HubDataContext.jsx";
 import { LogoutModal } from "./components/LogoutModal.jsx";
+import { WeatherButton } from "./components/WeatherButton.jsx";
+import { WeatherModal } from "./components/WeatherModal.jsx";
+import { LocationPermissionModal } from "./components/LocationPermissionModal.jsx";
+import { LocationMovedToast } from "./components/LocationMovedToast.jsx";
+import { useWeatherLocation } from "./hooks/useWeatherLocation.js";
 
 const PAGES = [
   // Dashboard (live per-device telemetry + Configuration) is user-role only -
@@ -29,8 +34,15 @@ function AuthedApp() {
   const defaultPage = user.role === "admin" ? "admin" : "dashboard";
   const [page, setPage] = useState(defaultPage);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  // ESP32 firmware version of whichever device BMSDashboard currently has
+  // active - lifted up via a callback since the pill it's shown next to
+  // lives here, outside BMSDashboard itself.
+  const [activeSoftwareVersion, setActiveSoftwareVersion] = useState(null);
   const pages = PAGES.filter((p) => (p.adminOnly ? user.role === "admin" : !p.userOnly || user.role !== "admin"));
   const activePage = pages.find((p) => p.id === page) ? page : defaultPage;
+
+  const [showWeatherModal, setShowWeatherModal] = useState(false);
+  const weatherLoc = useWeatherLocation();
 
   return (
     <HubDataProvider>
@@ -55,11 +67,23 @@ function AuthedApp() {
               </button>
             );
           })}
+          {activePage === "dashboard" && activeSoftwareVersion && (
+            <span
+              title="ESP32 firmware version"
+              className="inline-flex items-center gap-1 rounded-lg bg-[var(--muted)] px-2 py-1 text-[10px] font-semibold text-[var(--muted-foreground)]"
+            >
+              <Cpu className="size-3" />v{activeSoftwareVersion}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-[var(--muted-foreground)]">
-            {user.email} · <span className="font-semibold text-[var(--foreground)]">{user.role}</span>
-          </span>
+          <WeatherButton
+            onClick={async () => {
+              setShowWeatherModal(true);
+              await weatherLoc.openWeather();
+            }}
+          />
+          <span className="text-xs text-[var(--muted-foreground)]">{user.email}</span>
           {/* Dashboard renders its own logout button (TopBar.jsx) - this one
               only needs to appear on pages that don't, i.e. Admin Monitor,
               which admin-only sessions land on since they no longer have a
@@ -76,7 +100,11 @@ function AuthedApp() {
           )}
         </div>
       </div>
-      {activePage === "dashboard" ? <BMSDashboard /> : <AdminMonitor />}
+      {activePage === "dashboard" ? (
+        <BMSDashboard onSoftwareVersionChange={setActiveSoftwareVersion} />
+      ) : (
+        <AdminMonitor />
+      )}
       <LogoutModal
         isOpen={showLogoutModal}
         onClose={() => setShowLogoutModal(false)}
@@ -84,6 +112,27 @@ function AuthedApp() {
           setShowLogoutModal(false);
           logout();
         }}
+      />
+
+      <LocationPermissionModal
+        open={weatherLoc.showPermissionPrompt}
+        loading={weatherLoc.loading}
+        onAllow={() => weatherLoc.detectLocation().catch(() => {})}
+        onDismiss={weatherLoc.dismissPermissionPrompt}
+      />
+      <LocationMovedToast
+        open={weatherLoc.movedNotice}
+        onUpdate={weatherLoc.updateLocationNow}
+        onDismiss={weatherLoc.dismissMovedNotice}
+      />
+      <WeatherModal
+        open={showWeatherModal}
+        onClose={() => setShowWeatherModal(false)}
+        weather={weatherLoc.weather}
+        loading={weatherLoc.loading}
+        error={weatherLoc.error}
+        location={weatherLoc.location}
+        onRetry={() => weatherLoc.openWeather()}
       />
     </HubDataProvider>
   );

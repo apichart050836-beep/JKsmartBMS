@@ -1,5 +1,5 @@
 import React from "react";
-import { ClipboardList, Settings, LogOut, BatteryFull, Sun, Moon, Cpu } from "lucide-react"; // เพิ่ม LogOut เข้าไป
+import { ClipboardList, Settings, LogOut, BatteryFull, Sun, Moon } from "lucide-react"; // เพิ่ม LogOut เข้าไป
 import { useTheme } from "../context/ThemeContext.jsx";
 
 /**
@@ -59,8 +59,6 @@ export function TopBar({
     onOpenConfig,
     onLogout, // รับฟังก์ชัน onLogout เข้ามา
     configDisabled = false,
-    softwareVersion,
-    hardwareVersion,
 }) {
     const { theme, toggleTheme } = useTheme();
     const isDark = theme === "dark";
@@ -71,18 +69,6 @@ export function TopBar({
 
             {/* Right: Action Buttons */}
             <div className="flex items-center gap-2">
-                {/* ESP32 firmware version - real info.software_version field for
-                    whichever device is active, not an app version number. */}
-                {softwareVersion && (
-                    <span
-                        title={hardwareVersion ? `Hardware: ${hardwareVersion}` : undefined}
-                        className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--card)] px-3 py-2 text-xs font-semibold text-[var(--muted-foreground)] ring-1 ring-[var(--border)] shadow-xs"
-                    >
-                        <Cpu className="size-3.5" />
-                        <span>v{softwareVersion}</span>
-                    </span>
-                )}
-
                 {/* System Log Button */}
                 <button
                     type="button"
