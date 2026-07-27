@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { ArrowUpRight, ArrowDownRight, Cable, RefreshCw, WifiOff, Clock, MessageCircleQuestion } from "lucide-react";
 import { clamp, statusTone, voltDiffToneWithThreshold } from "./lib/tone.js";
 import { useBmsPackLive } from "./hooks/useBmsPackLive.js";
@@ -19,6 +19,7 @@ import { LogoutModal } from "./components/LogoutModal";
 import { computeAlarms } from "./lib/alarms.js";
 import { AlarmList } from "./components/AlarmList.jsx";
 import { AnnouncementBanner } from "./components/AnnouncementBanner.jsx";
+import { FirmwareUpdateToast } from "./components/FirmwareUpdateToast.jsx";
 import { useDailyEnergy } from "./hooks/useDailyEnergy.js";
 /**
  * Design language cloned from the ThemeWagon "Smart Home" dashboard template:
@@ -349,6 +350,40 @@ export default function BMSDashboard() {
   const active = packs.find((p) => p.id === activeBmsId) ?? packs[0];
   const activeConfig = slots.find((b) => b.id === activeBmsId) ?? slots[0];
 
+  // ESP32 firmware version - real field (info.software_version), same
+  // object already used for battery_type elsewhere. There's no dedicated
+  // "update in progress" field in Firebase, so a firmware update is
+  // inferred the only way it's observable here: this specific device's
+  // own software_version reading changing value between polls. Tracked
+  // per-slot (not globally) so switching to a device that just happens to
+  // run a different version doesn't get mistaken for an update.
+  const prevVersionsRef = useRef({});
+  const [firmwareUpdate, setFirmwareUpdate] = useState(null);
+  useEffect(() => {
+    for (const pack of packs) {
+      const version = pack.info?.software_version;
+      if (!version) continue;
+      const prev = prevVersionsRef.current[pack.id];
+      if (prev !== undefined && prev !== version) {
+        setFirmwareUpdate({ deviceLabel: pack.name, version });
+        setTimeout(() => setFirmwareUpdate((cur) => (cur?.version === version ? null : cur)), 6000);
+      }
+      prevVersionsRef.current[pack.id] = version;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    bms0.info,
+    bms1.info,
+    bms2.info,
+    bms3.info,
+    bms4.info,
+    bms5.info,
+    bms6.info,
+    bms7.info,
+    bms8.info,
+    bms9.info,
+  ]);
+
   // Real today-so-far charged/discharged Ah & Wh, computed server-side from
   // actual telemetry_log rows (V x I x t via the real signed charge_current
   // field) - not Firebase's dailyChargeAh/dailyDischargeAh, which don't
@@ -576,10 +611,13 @@ export default function BMSDashboard() {
         </div>
       ) : (
         <>
+        <FirmwareUpdateToast update={firmwareUpdate} />
         {/* Top Bar: BMS 1-N (left) + System Log / Configuration (right) */}
         <TopBar
           tabs={slots.filter((s) => s.live).map((s) => ({ id: s.id, name: s.name, mac: s.deviceKey }))}
           activeBmsId={activeBmsId}
+          softwareVersion={active.info?.software_version}
+          hardwareVersion={active.info?.hardware_version}
           onSelectBms={setActiveBmsId}
           onOpenLog={() => setShowLog(true)}
           onOpenConfig={() => setShowConfig(true)}
