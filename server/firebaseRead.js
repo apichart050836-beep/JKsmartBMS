@@ -25,6 +25,18 @@ async function readRest(path) {
   return res.json();
 }
 
+// Once the Admin SDK's realtime websocket proves unreachable from this
+// process (confirmed on Render: every read timed out at exactly 8s), stop
+// retrying it - paying an 8s tax on every single read would make an
+// environment that can't complete that handshake at all crawl. Naturally
+// resets on redeploy/restart in case connectivity is ever fixed. Exported
+// so realtime.js can skip its (equally broken, in that case) live push
+// path and poll instead.
+let adminSdkBroken = false;
+export function isAdminSdkBroken() {
+  return adminSdkBroken;
+}
+
 // Read-only. Prefers the privileged Admin SDK (adminDb) when the service
 // account key is present; falls back to the plain public REST endpoint
 // otherwise (real project's Security Rules currently allow public read on
@@ -37,13 +49,14 @@ async function readRest(path) {
 // real production database aren't something to attempt without the
 // privileged key confirming what's actually allowed.
 export async function readPath(path) {
-  if (isFirebaseConfigured) {
+  if (isFirebaseConfigured && !adminSdkBroken) {
     try {
       const snap = await withTimeout(adminDb.ref(path).once("value"), path);
       return snap.val();
     } catch (err) {
       if (!REST_BASE) throw err;
-      console.warn(`Admin SDK read failed for ${path} (${err.message}), falling back to REST`);
+      adminSdkBroken = true;
+      console.warn(`Admin SDK read failed for ${path} (${err.message}) - switching to REST for the rest of this process`);
       return readRest(path);
     }
   }
