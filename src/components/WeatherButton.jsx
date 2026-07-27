@@ -8,9 +8,9 @@ export function WeatherButton({ onClick }) {
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center gap-2 rounded-2xl border border-white/25 bg-white/10 px-4 py-2.5 text-sm font-semibold text-[var(--foreground)] shadow-lg backdrop-blur-md transition-all duration-200 hover:scale-105 hover:bg-white/20 hover:shadow-xl active:scale-95"
+      className="inline-flex items-center gap-1 rounded-xl border border-white/25 bg-white/10 px-2.5 py-1.5 text-xs font-semibold text-[var(--foreground)] shadow-lg backdrop-blur-md transition-all duration-200 hover:scale-105 hover:bg-white/20 hover:shadow-xl active:scale-95"
     >
-      <span className="text-base leading-none">☀️</span>
+      <span className="text-sm leading-none">☀️</span>
       <span>ดูสภาพอากาศ</span>
     </button>
   );
