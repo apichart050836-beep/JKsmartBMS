@@ -38,6 +38,10 @@ import { useDailyEnergy } from "./hooks/useDailyEnergy.js";
 // today so a 4th doesn't need a code change; bump it if the fleet outgrows it.
 const MAX_BMS_SLOTS = 10;
 
+// localStorage key for the last-selected BMS tab, so a page refresh doesn't
+// silently bounce the user back to BMS 1.
+const ACTIVE_BMS_STORAGE_KEY = "bms-active-tab";
+
 // Applied to every discovered device uniformly - the reference-screenshot
 // OVP/UVP numbers (2.70V/1.80V) don't fit this pack's real chemistry (live
 // cells sit ~3.0-3.2V, which would trip a false OVP alarm on every cell
@@ -287,7 +291,25 @@ function Pill({ tone = "brand", icon: Icon, children }) {
 export default function BMSDashboard() {
   const { logout } = useAuth();
   const [now, setNow] = useState(new Date());
-  const [activeBmsId, setActiveBmsId] = useState("bms-slot-0");
+  // Persisted across refreshes - slot ids are stable/positional (see
+  // buildBmsSlots), so restoring whichever one the user had open last is
+  // safe even though the underlying device list is only known after
+  // devices load. Falls back to the first slot for a first-ever visit or
+  // if localStorage is unavailable.
+  const [activeBmsId, setActiveBmsId] = useState(() => {
+    try {
+      return localStorage.getItem(ACTIVE_BMS_STORAGE_KEY) || "bms-slot-0";
+    } catch {
+      return "bms-slot-0";
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(ACTIVE_BMS_STORAGE_KEY, activeBmsId);
+    } catch {
+      // Storage unavailable (private mode, quota, etc.) - just don't persist.
+    }
+  }, [activeBmsId]);
   const [showLog, setShowLog] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
   const [showAlarms, setShowAlarms] = useState(false);
@@ -621,6 +643,7 @@ export default function BMSDashboard() {
                dischargedWh={dailyEnergy.dischargedWh}
                socPercent={displaySoc}
                remainingRuntime={active.remainingRuntime}
+               timeToFullCharge={active.timeToFullCharge}
                history={active.powerHistory}
              />
                                       </div>

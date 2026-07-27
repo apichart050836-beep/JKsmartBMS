@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, useRef } from "react";
 import { voltDiffTone, tempTone } from "../lib/tone.js";
 import { pick } from "../lib/pick.js";
-import { computeRemainingRuntime } from "../lib/remainingRuntime.js";
+import { computeRemainingRuntime, computeTimeToFullCharge } from "../lib/remainingRuntime.js";
 import { useHubData } from "../context/HubDataContext.jsx";
 
 const POWER_HISTORY_LEN = 30;
@@ -174,6 +174,18 @@ export function useBmsPackLive(config) {
       }),
     [current, status, ratedCapacityAh, soc, packVoltage]
   );
+  const timeToFullCharge = useMemo(
+    () =>
+      computeTimeToFullCharge({
+        current,
+        power: pick(status, "power", "battery_power"),
+        remainingCapacityAh: status.capacity_remain,
+        ratedCapacityAh,
+        soc,
+        voltage: packVoltage,
+      }),
+    [current, status, ratedCapacityAh, soc, packVoltage]
+  );
 
   return {
     id,
@@ -216,6 +228,7 @@ export function useBmsPackLive(config) {
     voltDiffMv,
     remainingAh,
     remainingRuntime,
+    timeToFullCharge,
     avgTemp,
     maxTemp,
     status: statusLabel,

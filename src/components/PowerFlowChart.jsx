@@ -14,6 +14,7 @@ export function PowerFlowChart({
     dischargedWh = 0,
     socPercent = 0,
     remainingRuntime,
+    timeToFullCharge,
     history = [],
 }) {
     // 1. คำนวณ Power Realtime (P = V * I)
@@ -28,9 +29,6 @@ export function PowerFlowChart({
     // server's actual V x I x t integration over telemetry_log (see
     // useDailyEnergy.js / server/routes/history.js), not an Ah x
     // current-instant-voltage approximation.
-
-    // 4. คำนวณ Net Energy Balance (สุทธิ)
-    const netAh = chargedAh - dischargedAh;
 
     return (
         <section className="rounded-2xl bg-[var(--card)] p-5 shadow-sm ring-1 ring-[var(--border)] md:p-6">
@@ -100,14 +98,14 @@ export function PowerFlowChart({
                 </div>
 
                 {/* Card 2: Main Power Hub Center */}
-                <div className="flex flex-col justify-between rounded-xl bg-[var(--card)] p-4 ring-1 ring-[var(--border)]">
-                    <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold text-[var(--muted-foreground)]">Remaining Runtime</span>
-                        <Activity className="size-4 text-[var(--brand)]" />
-                    </div>
-                    <div className="my-2 text-center">
+                <div className="flex flex-col justify-center gap-3 rounded-xl bg-[var(--card)] p-4 ring-1 ring-[var(--border)]">
+                    <div className="text-center">
+                        <div className="flex items-center justify-center gap-1.5">
+                            <Activity className="size-3.5 text-[var(--brand)]" />
+                            <span className="text-xs font-semibold text-[var(--muted-foreground)]">Remaining Runtime</span>
+                        </div>
                         <div
-                            className={`text-2xl font-extrabold tabular-nums ${remainingRuntime?.state === "charging"
+                            className={`mt-1 text-[22px] font-extrabold tabular-nums ${remainingRuntime?.state === "charging"
                                     ? "text-emerald-500"
                                     : remainingRuntime?.state === "standby"
                                         ? "text-[var(--muted-foreground)]"
@@ -116,18 +114,24 @@ export function PowerFlowChart({
                         >
                             {remainingRuntime?.label ?? "-"}
                         </div>
-                        <div className="text-xs text-[var(--muted-foreground)] tabular-nums">
-                            {absPowerW.toFixed(0)} Watts @ {packVoltage.toFixed(2)}V
-                        </div>
                     </div>
-                    <div className="flex items-center justify-around border-t border-[var(--border)]/60 pt-2 text-[11px]">
-                        <span className="text-[var(--muted-foreground)]">Net Balance:</span>
-                        <span
-                            className={`font-bold tabular-nums ${netAh >= 0 ? "text-emerald-500" : "text-amber-500"
+                    <div className="border-t border-[var(--border)]/60 pt-3 text-center">
+                        <div className="flex items-center justify-center gap-1.5">
+                            <Zap className="size-3.5 text-[var(--brand)]" />
+                            <span className="text-xs font-semibold text-[var(--muted-foreground)]">Time to Full Charge</span>
+                        </div>
+                        <div
+                            className={`mt-1 text-[22px] font-extrabold tabular-nums ${timeToFullCharge?.state === "charging"
+                                    ? "text-emerald-500"
+                                    : timeToFullCharge?.state === "standby"
+                                        ? "text-[var(--muted-foreground)]"
+                                        : timeToFullCharge?.state === "not_charging"
+                                            ? "text-amber-500"
+                                            : "text-[var(--foreground)]"
                                 }`}
                         >
-                            {netAh >= 0 ? `+${netAh.toFixed(1)}` : netAh.toFixed(1)} Ah
-                        </span>
+                            {timeToFullCharge?.label ?? "-"}
+                        </div>
                     </div>
                 </div>
 
