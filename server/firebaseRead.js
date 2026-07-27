@@ -2,6 +2,23 @@ import { adminDb, isFirebaseConfigured } from "./firebaseAdmin.js";
 
 const REST_BASE = process.env.FIREBASE_DATABASE_URL;
 
+// adminDb.ref(...).once("value") opens a websocket to the RTDB backend and
+// has no built-in timeout - if that connection stalls (flaky egress, a slow
+// TLS/auth handshake, etc.) the call hangs forever with no error, which on
+// a hosted platform means the HTTP request never completes at all. Every
+// read gets a hard ceiling so a Firebase hiccup surfaces as a fast, clear
+// error instead of freezing whatever route awaited it (login included).
+const READ_TIMEOUT_MS = 8000;
+
+function withTimeout(promise, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`Firebase read timed out after ${READ_TIMEOUT_MS}ms for ${label}`)), READ_TIMEOUT_MS)
+    ),
+  ]);
+}
+
 // Read-only. Prefers the privileged Admin SDK (adminDb) when the service
 // account key is present; falls back to the plain public REST endpoint
 // otherwise (real project's Security Rules currently allow public read on
@@ -11,7 +28,7 @@ const REST_BASE = process.env.FIREBASE_DATABASE_URL;
 // privileged key confirming what's actually allowed.
 export async function readPath(path) {
   if (isFirebaseConfigured) {
-    const snap = await adminDb.ref(path).once("value");
+    const snap = await withTimeout(adminDb.ref(path).once("value"), path);
     return snap.val();
   }
   const res = await fetch(`${REST_BASE}/${path}.json`);

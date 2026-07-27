@@ -24,17 +24,26 @@ function devicePath(hubId, bmsKey) {
 router.get("/", requireAuth, async (req, res) => {
   const allowed = allowedHubIds(req.user);
 
-  if (allowed === null) {
-    const val = await readPath("JK_BMS_HUB");
-    return res.json({ hubs: val ?? {} });
-  }
+  try {
+    if (allowed === null) {
+      const val = await readPath("JK_BMS_HUB");
+      return res.json({ hubs: val ?? {} });
+    }
 
-  const hubs = {};
-  for (const hubId of allowed) {
-    const val = await readPath(`JK_BMS_HUB/${hubId}`);
-    if (val != null) hubs[hubId] = val;
+    const hubs = {};
+    for (const hubId of allowed) {
+      const val = await readPath(`JK_BMS_HUB/${hubId}`);
+      if (val != null) hubs[hubId] = val;
+    }
+    res.json({ hubs });
+  } catch (err) {
+    // readPath now times out instead of hanging forever, but Express 4
+    // still won't forward a rejected async handler to error middleware on
+    // its own - without this the request would just hang until the client
+    // gives up, exactly like the login hang this was modeled on.
+    console.error(`GET /api/hubs failed: ${err.message}`);
+    res.status(503).json({ error: "Could not read hub data" });
   }
-  res.json({ hubs });
 });
 
 // Configuration panel writes (Charge/Discharge/Balancer/etc settings, device

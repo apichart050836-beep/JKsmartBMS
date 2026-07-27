@@ -18,8 +18,17 @@ const router = Router();
 //   single shared default (DEFAULT_USER_PASSWORD), not a per-hub value.
 async function hubExists(email) {
   const hubId = emailToHubId(email);
-  const val = await readPath(`JK_BMS_HUB/${hubId}`);
-  return val != null ? hubId : null;
+  try {
+    const val = await readPath(`JK_BMS_HUB/${hubId}`);
+    return val != null ? hubId : null;
+  } catch (err) {
+    // A Firebase read failure (timeout, connectivity) must not hang or crash
+    // the login request - Express 4 doesn't catch rejected promises from
+    // async handlers, so an uncaught rejection here would leave the client
+    // waiting forever instead of getting a clear response.
+    console.error(`hubExists lookup failed for ${email}: ${err.message}`);
+    return null;
+  }
 }
 
 // Step 1 of the login flow: does this Gmail exist at all. Deliberately does
