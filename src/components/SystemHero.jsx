@@ -27,6 +27,7 @@ export function SystemHero({
     socPercent = 0,
     cellAvgVoltage = 0,
     soh = 100,
+    healthScore,
     chargedAh = 0,
     dischargedAh = 0,
     chargeMOS = true,
@@ -155,6 +156,26 @@ export function SystemHero({
                         </div>
                     </div>
 
+                    {healthScore != null && (
+                        <div className="mt-2 border-t border-[var(--border)]/80 pt-2">
+                            <div className="mb-1 flex items-center justify-between text-xs">
+                                <span className="font-semibold text-[var(--muted-foreground)]">Battery Health Score</span>
+                                <span
+                                    className={`font-bold tabular-nums ${healthScore >= 80 ? "text-emerald-500" : healthScore >= 50 ? "text-amber-500" : "text-rose-500"
+                                        }`}
+                                >
+                                    {healthScore}/100
+                                </span>
+                            </div>
+                            <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--border)]">
+                                <div
+                                    className={`h-full rounded-full transition-all duration-500 ${healthScore >= 80 ? "bg-emerald-500" : healthScore >= 50 ? "bg-amber-500" : "bg-rose-500"
+                                        }`}
+                                    style={{ width: `${Math.min(Math.max(healthScore, 0), 100)}%` }}
+                                />
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* ========================================================= */}

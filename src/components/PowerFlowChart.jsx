@@ -15,6 +15,7 @@ export function PowerFlowChart({
     socPercent = 0,
     remainingRuntime,
     timeToFullCharge,
+    recommendedCurrentA,
     history = [],
 }) {
     // 1. คำนวณ Power Realtime (P = V * I)
@@ -135,6 +136,14 @@ export function PowerFlowChart({
                             {timeToFullCharge?.label ?? "-"}
                         </div>
                     </div>
+                    {typeof recommendedCurrentA === "number" && (
+                        <div className="flex items-center justify-between border-t border-[var(--border)]/60 pt-2 text-[11px] text-[var(--muted-foreground)]">
+                            <span>แนะนำกระแสชาร์จ/ใช้ (0.3C)</span>
+                            <span className="font-semibold text-[var(--foreground)] tabular-nums">
+                                ไม่เกิน {recommendedCurrentA.toFixed(1)} A
+                            </span>
+                        </div>
+                    )}
                 </div>
 
                 {/* Card 3: Discharge Outflow (-) */}

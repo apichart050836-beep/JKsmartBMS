@@ -17,6 +17,7 @@ import { api } from "./lib/apiClient.js";
 import { useAuth } from "./context/AuthContext.jsx";
 import { LogoutModal } from "./components/LogoutModal";
 import { computeAlarms } from "./lib/alarms.js";
+import { computeBatteryHealthScore } from "./lib/batteryHealthScore.js";
 import { AlarmList } from "./components/AlarmList.jsx";
 import { AnnouncementBanner } from "./components/AnnouncementBanner.jsx";
 import { FirmwareUpdateToast } from "./components/FirmwareUpdateToast.jsx";
@@ -513,6 +514,11 @@ export default function BMSDashboard() {
   // charge (Ah) a pack holds.
   const effectiveCapacityAh = settings.capacityAh;
   const displaySoc = clamp((active.remainingAh / effectiveCapacityAh) * 100, 0, 100);
+  // Recommended charge/discharge current: 0.3C of rated capacity, per
+  // request - a conservative, chemistry-agnostic rate of thumb rather than
+  // a per-cell datasheet limit (the app doesn't have per-cell datasheet
+  // data to work from).
+  const recommendedCurrentA = effectiveCapacityAh * 0.3;
 
   const balDeltaVolt = settings.balDeltaVolt;
   const vd = voltDiffToneWithThreshold(active.voltDiffMv, balDeltaVolt);
@@ -528,6 +534,18 @@ export default function BMSDashboard() {
   // Charging uses the (typically stricter) Charge OTP limit, otherwise the
   // Discharge OTP limit - matches which protection would actually trip.
   const otpLimit = active.status === "Charging" ? settings.chgOtp : settings.dsgOtp;
+
+  // Weighted composite (SOH 50% / cell imbalance 25% / temperature 15% /
+  // wire resistance spread 10%) - see batteryHealthScore.js. Reuses the
+  // same real otpLimit the Temperature card already shows, so "hot" means
+  // the same thing in both places.
+  const healthScore = computeBatteryHealthScore({
+    soh: active.soh,
+    voltDiffMv: active.voltDiffMv,
+    maxTemp: active.maxTemp,
+    otpThreshold: otpLimit || 70,
+    wireResistances: active.wireResistances,
+  });
 
   // Fill bar is scaled against the actual UVP-OVP protection window, not the
   // pack's own min/max spread - a healthy 4S LiFePO4 pack sitting at ~3.1V
@@ -657,6 +675,7 @@ export default function BMSDashboard() {
               socPercent={displaySoc}
               cellAvgVoltage={active.cells.length ? active.cells.reduce((a, b) => a + b, 0) / active.cells.length : 0}
               soh={active.soh}
+              healthScore={healthScore.score}
               chargedAh={activeEnergy.chargedAh}
               dischargedAh={activeEnergy.dischargedAh}
               chargeMOS={chargeMOS}
@@ -682,6 +701,7 @@ export default function BMSDashboard() {
                socPercent={displaySoc}
                remainingRuntime={active.remainingRuntime}
                timeToFullCharge={active.timeToFullCharge}
+               recommendedCurrentA={recommendedCurrentA}
                history={active.powerHistory}
              />
                                       </div>
