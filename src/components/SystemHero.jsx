@@ -49,6 +49,7 @@ export function SystemHero({
     dischargedAh = 0,
     chargeMOS = true,
     dischargeMOS = true,
+    chargeStatus = null,
     balancerOn = false,
     balancerCurrentA = 0,
     voltDiffMv = 0,
@@ -113,7 +114,10 @@ export function SystemHero({
                     {/* Charge Status */}
                     <span className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold ${chargeMOS ? "bg-emerald-500/10 text-emerald-500" : "bg-zinc-500/10 text-zinc-400"}`}>
                         <Zap className="size-3.5" />
-                        <span>Charge {chargeMOS ? "ON" : "OFF"}</span>
+                        <span>
+                            Charge {chargeMOS ? "ON" : "OFF"}
+                            {chargeMOS && chargeStatus ? ` · ${chargeStatus}` : ""}
+                        </span>
                     </span>
 
                     {/* Discharge Status */}

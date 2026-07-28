@@ -351,9 +351,12 @@ export default function BMSDashboard({ onSoftwareVersionChange, onOpenWeather })
   // before it lands reads the old OFF value and (with the old unconditional
   // sync) blindly overwrote the switch right back to OFF a moment later -
   // classic race condition, same class already found and fixed once for
-  // DeviceNameRow above. Keyed by pack id -> { charge?: pendingValue,
-  // discharge?: pendingValue } - a key present means "we just wrote this
-  // value and are still waiting to see Firebase echo it back."
+  // DeviceNameRow above. Keyed by pack id -> { charge?: { pending, seeded },
+  // discharge?: { pending, seeded } }. `pending !== undefined` means "we
+  // just wrote this value and are still waiting to see Firebase echo it
+  // back." `seeded` distinguishes "this pack's very first real value from
+  // Firebase" (adopted silently - not a "change" from anything) from a
+  // genuine later change once a real baseline exists.
   const chargeSwitchGuardRef = useRef({});
 
   // Hooks must run an unconditional, fixed number of times per render - see
@@ -454,13 +457,15 @@ export default function BMSDashboard({ onSoftwareVersionChange, onOpenWeather })
           // poll behavior unchanged.
           if (dashKey === "charge" || dashKey === "discharge") {
             if (!chargeSwitchGuardRef.current[pack.id]) chargeSwitchGuardRef.current[pack.id] = {};
-            const guard = chargeSwitchGuardRef.current[pack.id];
-            const pending = guard[dashKey];
-            if (pending !== undefined) {
-              if (value === pending) {
+            if (!chargeSwitchGuardRef.current[pack.id][dashKey]) {
+              chargeSwitchGuardRef.current[pack.id][dashKey] = { pending: undefined, seeded: false };
+            }
+            const guard = chargeSwitchGuardRef.current[pack.id][dashKey];
+            if (guard.pending !== undefined) {
+              if (value === guard.pending) {
                 // Our own write round-tripped through Firebase - confirmed,
                 // stop guarding this key.
-                guard[dashKey] = undefined;
+                guard.pending = undefined;
               } else {
                 // A poll that started before our write landed, reading the
                 // old value - ignore it rather than let it clobber what the
@@ -469,13 +474,23 @@ export default function BMSDashboard({ onSoftwareVersionChange, onOpenWeather })
                 logSwitchChange(dashKey, "Ignored invalid overwrite (stale poll racing a pending write)", value);
                 continue;
               }
+            } else if (!guard.seeded) {
+              // First real value this pack has ever reported for this key -
+              // adopt it silently. Comparing it against defaultSettings()'s
+              // hardcoded placeholder (charge: true) isn't a real "BMS
+              // changed something" event, just this pack's local state
+              // catching up to what Firebase already held - logging it as
+              // "Changed by BMS" was misleading (and, worse, produced a
+              // burst of spurious log lines while the socket connection was
+              // still settling on first load).
+              guard.seeded = true;
             } else if (next[pack.id] && value !== next[pack.id][dashKey]) {
-              // No write of ours is pending, yet Firebase now holds a
-              // different value than what's on screen - the only other
-              // party that can write .../settings/charge|discharge is the
-              // BMS/bridge itself (e.g. a protection trip, or a reboot
-              // echoing its real MOSFET state), so this is a legitimate
-              // externally-sourced change, not a race - accept it.
+              // Already seeded, no write of ours is pending, yet Firebase
+              // now holds a different value than what's on screen - the
+              // only other party that can write .../settings/charge|
+              // discharge is the BMS/bridge itself (e.g. a protection trip,
+              // or a reboot echoing its real MOSFET state), so this is a
+              // legitimate externally-sourced change, not a race - accept it.
               logSwitchChange(dashKey, "Changed by BMS", value);
             }
           }
@@ -551,7 +566,14 @@ export default function BMSDashboard({ onSoftwareVersionChange, onOpenWeather })
       // that lands between now and the write actually completing can't
       // clobber this - see chargeSwitchGuardRef above and the sync effect.
       if (!chargeSwitchGuardRef.current[activeBmsId]) chargeSwitchGuardRef.current[activeBmsId] = {};
-      chargeSwitchGuardRef.current[activeBmsId][key] = value;
+      if (!chargeSwitchGuardRef.current[activeBmsId][key]) {
+        chargeSwitchGuardRef.current[activeBmsId][key] = { pending: undefined, seeded: true };
+      }
+      // A user-initiated write always counts as "seeded" too - once the
+      // user has touched this switch, any future differing value is by
+      // definition a change from what's on screen, real seed or not.
+      chargeSwitchGuardRef.current[activeBmsId][key].pending = value;
+      chargeSwitchGuardRef.current[activeBmsId][key].seeded = true;
       logSwitchChange(key, "Changed by USER", value);
     }
     setSettingsByPack((s) => ({
@@ -601,6 +623,7 @@ export default function BMSDashboard({ onSoftwareVersionChange, onOpenWeather })
   // runs - kept as a fallback in case a non-live pack shape returns.
   const chargeMOS = active.isLive ? active.chargeMOS : settings.charge;
   const dischargeMOS = active.isLive ? active.dischargeMOS : settings.discharge;
+  const chargeStatus = active.isLive ? active.chargeStatus : null;
   const balancerOn = active.isLive ? active.balancerOn : settings.balancer;
 
   // Charging uses the (typically stricter) Charge OTP limit, otherwise the
@@ -753,6 +776,7 @@ export default function BMSDashboard({ onSoftwareVersionChange, onOpenWeather })
               dischargedAh={activeEnergy.dischargedAh}
               chargeMOS={chargeMOS}
               dischargeMOS={dischargeMOS}
+              chargeStatus={chargeStatus}
               balancerOn={balancerOn}
               balancerCurrentA={active.balancerCurrent}
               voltDiffMv={active.voltDiffMv}

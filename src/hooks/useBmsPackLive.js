@@ -115,13 +115,24 @@ export function useBmsPackLive(config) {
 
   const packVoltage = pick(status, "totalVoltage", "battery_voltage") ?? cells.reduce((a, b) => a + b, 0);
   const batteryVoltageRaw = status.battery_voltage;
-  const chargeMOS = !!pick(status, "charging_state", "charge");
-  const dischargeMOS = !!status.discharge;
   const power = pick(status, "power", "battery_power") ?? 0;
   const current = pick(status, "current", "charge_current") ?? 0;
   // Same real-current-sign basis as the log entries above - not the
   // charging_state/discharge MOSFET enable switches.
   const statusLabel = current > 0 ? "Charging" : current < 0 ? "Discharging" : "Standby";
+  // Dashboard's Charge ON/OFF badge - was `charging_state`, but confirmed
+  // live (2026-07-28, e072a1d6dd18) that field can read false while
+  // charge_current/battery_power/charge_status all agree charging is
+  // actively happening (charge_current: +9.86A, battery_power: +527W,
+  // charge_status: "Bulk") - charging_state evidently isn't a reliable
+  // "is it charging" signal on this hardware, so use the same real signed
+  // current the rest of this hook already trusts for statusLabel above.
+  // chargeStatus (Bulk/Absorption/Float) rides along for the badge to show
+  // alongside ON/OFF. Discharge keeps its original MOSFET-enable field -
+  // only Charge was reported/confirmed mismatched.
+  const chargeMOS = current > 0;
+  const dischargeMOS = !!status.discharge;
+  const chargeStatus = status.charge_status ?? null;
 
   const ratedCapacityAh = status.nominal_capacity || fallbackCapacityAh;
   const remainingAh = status.capacity_remain ?? 0;
@@ -231,6 +242,7 @@ export function useBmsPackLive(config) {
     tempChannels,
     chargeMOS,
     dischargeMOS,
+    chargeStatus,
     balancerOn,
     balancerCurrent,
     log,
