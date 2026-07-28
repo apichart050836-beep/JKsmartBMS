@@ -59,9 +59,14 @@ export function WeatherModal({ open, onClose, weather, loading, error, location,
 
           {!loading && !error && weather && (
             <>
+              {/* The saved installation name (what the user actually picked/
+                  confirmed) - not weather.locationName, which is
+                  OpenWeatherMap's own city-name guess for that coordinate
+                  and can disagree with reality for adjacent Thai
+                  sub-districts (confirmed live: saved "สันผีเสื้อ" showed as
+                  "สันทราย", a real but different nearby sub-district). */}
               <p className="flex items-center gap-1.5 text-xs text-[var(--muted-foreground)]">
-                📍 {weather.locationName}
-                {weather.country ? `, ${weather.country}` : ""}
+                📍 {location?.name ?? weather.locationName}
               </p>
 
               <div className="my-4 flex items-center justify-center gap-4">
