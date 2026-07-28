@@ -11,6 +11,11 @@ import { WeatherButton } from "./WeatherButton.jsx";
  */
 function BmsTabs({ tabs, activeId, onSelect }) {
     return (
+        // Scrolls horizontally within itself once there are more tabs than
+        // fit (4+ devices on a phone-width screen) instead of blowing out
+        // the whole page's width - max-w-full bounds it to whatever the
+        // parent flex row actually allocates.
+        <div className="min-w-0 max-w-full overflow-x-auto">
         <div className="inline-flex items-center gap-1 rounded-2xl bg-[var(--muted)]/70 p-1.5 ring-1 ring-[var(--border)]/50 backdrop-blur-xs">
             {tabs.map((tab) => {
                 const isActive = tab.id === activeId;
@@ -44,6 +49,7 @@ function BmsTabs({ tabs, activeId, onSelect }) {
                     100% { transform: translateX(100%); }
                 }
             `}</style>
+        </div>
         </div>
     );
 }
