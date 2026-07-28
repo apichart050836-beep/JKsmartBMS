@@ -29,6 +29,7 @@ const HEALTH_TONE_BG = {
 
 export function SystemHero({
     deviceLabel,
+    deviceMac,
     hubAccount,
     isOnline,
     onRefresh,
@@ -105,6 +106,7 @@ export function SystemHero({
                         )}
                     </div>
                     <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">
+                        {deviceMac && <span className="font-mono">{deviceMac} · </span>}
                         {batteryType} · {cellCount}S · Max Balancer {maxBalancerCurrentA}A
                     </p>
                 </div>

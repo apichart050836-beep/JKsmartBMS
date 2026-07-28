@@ -706,9 +706,9 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
   //   as the data can move: the backend polls Firebase every 5s
   //   (realtime.js's REST_POLL_MS), matching jkbms-bridge.yaml's own ~5s
   //   push cadence, so there's nothing more real-time to extract there.
-  //   20s just gives the offline call itself more room (4 missed poll
+  //   30s just gives the offline call itself more room (6 missed poll
   //   cycles) before declaring a dead BLE link, per request.
-  const STALE_AFTER_MS = 20000;
+  const STALE_AFTER_MS = 30000;
   const isOnline = active.isLive
     ? !!active.firebaseConnected &&
       !!active.lastUpdateAt &&
@@ -791,6 +791,7 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
             {/* JK BMS Control Center - Main Console Panel (Power & Energy + Remaining & Health) */}
             <SystemHero
               deviceLabel={activeDeviceLabel}
+              deviceMac={activeConfig.deviceKey}
               hubAccount={active.isLive ? activeConfig.hubId : undefined}
               isOnline={isOnline}
               onRefresh={() => window.location.reload()}
