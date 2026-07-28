@@ -114,9 +114,11 @@ const REMOTE_SETTINGS_MAP = {
   myCustomName: { fb: "my_custom_name", legacy: ["myBmsCustomName"] },
   cellOvp: { fb: "cell_ovp", legacy: ["overVoltageProtection"] },
   cellOvpr: { fb: "cell_ovpr", legacy: ["overVoltageRecovery"] },
-  // The real firmware only tracks one OVP-recovery register; mirror it into
-  // both dashboard fields rather than inventing a second one.
-  cellRcv: { fb: "cell_ovpr", legacy: ["overVoltageRecovery"] },
+  // Confirmed live (2026-07-28) this is a genuinely separate register from
+  // cell_ovpr, not the same one mirrored - cell_ovpr read 3.4V while
+  // cell_rcv read 3.51V on the same device at the same time. The earlier
+  // "only one OVP-recovery register" assumption was wrong.
+  cellRcv: { fb: "cell_rcv" },
   cellUvp: { fb: "cell_uvp", legacy: ["underVoltageProtection"] },
   cellUvpr: { fb: "cell_uvpr", legacy: ["underVoltageRecovery"] },
   cellCount: { fb: "cell_count", legacy: ["cellCount"] },
