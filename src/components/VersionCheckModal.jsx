@@ -17,7 +17,8 @@ export function VersionCheckModal({
   softwareVersion,
   hardwareVersion,
   onUpdate,
-  pendingRelease,
+  latestRelease,
+  releaseIsNew,
 }) {
   const [checking, setChecking] = useState(true);
 
@@ -62,22 +63,38 @@ export function VersionCheckModal({
               </div>
             </div>
 
-            {pendingRelease && (
-              <div className="mt-3 rounded-xl bg-[var(--brand-10)] p-3 text-left text-xs">
-                <p className="font-bold text-[var(--brand)]">🆕 มีเวอร์ชันใหม่: v{pendingRelease.version}</p>
-                <p className="mt-0.5 text-[var(--muted-foreground)]">{pendingRelease.filename}</p>
+            {/* Always shows the latest admin-published file (not just while
+                "new") - this is separate from ESP32 Software above, which
+                is the device's own live-reported version. This app has no
+                OTA transport, so these two only converge once someone
+                physically reflashes the device - showing this permanently
+                (not hiding it once acknowledged) avoids it looking like the
+                published version "disappeared" after pressing Update. */}
+            {latestRelease && (
+              <div
+                className={`mt-3 rounded-xl p-3 text-left text-xs ${
+                  releaseIsNew ? "bg-[var(--brand-10)]" : "bg-[var(--muted)]"
+                }`}
+              >
+                <p className={`font-bold ${releaseIsNew ? "text-[var(--brand)]" : "text-[var(--foreground)]"}`}>
+                  {releaseIsNew ? "🆕 " : "✓ "}เวอร์ชันล่าสุดที่เผยแพร่: v{latestRelease.version}
+                </p>
+                <p className="mt-0.5 text-[var(--muted-foreground)]">{latestRelease.filename}</p>
+                {!releaseIsNew && <p className="mt-0.5 text-[var(--muted-foreground)]">รับทราบแล้ว</p>}
               </div>
             )}
 
             <div className="mt-5 flex flex-col gap-2">
-              <button
-                type="button"
-                onClick={onUpdate}
-                className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-[var(--brand)] py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90"
-              >
-                <RefreshCw className="size-3.5" />
-                อัพเดทเฟิร์มแวร์
-              </button>
+              {releaseIsNew && (
+                <button
+                  type="button"
+                  onClick={onUpdate}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-[var(--brand)] py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                >
+                  <RefreshCw className="size-3.5" />
+                  อัพเดทเฟิร์มแวร์
+                </button>
+              )}
               <button
                 type="button"
                 onClick={onClose}

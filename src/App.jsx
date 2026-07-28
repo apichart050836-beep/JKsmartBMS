@@ -58,7 +58,8 @@ function UpdateBadge({ deviceVersions }) {
         deviceLabel={deviceVersions.deviceLabel}
         softwareVersion={deviceVersions.software}
         hardwareVersion={deviceVersions.hardware}
-        pendingRelease={firmwareIsNew ? firmwareRelease : null}
+        latestRelease={firmwareRelease}
+        releaseIsNew={firmwareIsNew}
         onUpdate={() => {
           setShowVersionModal(false);
           acknowledgeFirmwareRelease();
