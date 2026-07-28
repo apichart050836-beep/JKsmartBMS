@@ -198,6 +198,15 @@ const REMOTE_SETTINGS_MAP = {
   uart3Protocol: { fb: "uart3_protocol", legacy: ["uart3Protocol"] },
 };
 
+// Charge/Discharge Switch debug logging - every actual change to these two
+// fields' local state should say WHY, per explicit bug report ("Charge
+// Switch turns OFF by itself"). See the write-guard in BMSDashboard's
+// settings-sync effect and saveSetting() for what calls this and when.
+function logSwitchChange(dashKey, reason, value) {
+  const tag = dashKey === "charge" ? "[ChargeSwitch]" : "[DischargeSwitch]";
+  console.log(`${tag} ${reason}`, value);
+}
+
 function defaultSettings(pack) {
   return {
       // Control & Core
@@ -332,6 +341,21 @@ export default function BMSDashboard({ onSoftwareVersionChange, onOpenWeather })
   );
   const settings = settingsByPack[activeBmsId];
 
+  // Charge/Discharge Switch write-guard - see saveSetting() and the
+  // settings-sync effect below. Every OTHER Configuration field is fine
+  // being silently overwritten by whatever's currently in Firebase on every
+  // poll (that's how edits made directly on the BMS/LCD show up here) - but
+  // per explicit bug report, the Charge/Discharge switches specifically
+  // must never flip because of stale poll timing: user toggles ON, the
+  // write to Firebase is still in flight, and a poll that started just
+  // before it lands reads the old OFF value and (with the old unconditional
+  // sync) blindly overwrote the switch right back to OFF a moment later -
+  // classic race condition, same class already found and fixed once for
+  // DeviceNameRow above. Keyed by pack id -> { charge?: pendingValue,
+  // discharge?: pendingValue } - a key present means "we just wrote this
+  // value and are still waiting to see Firebase echo it back."
+  const chargeSwitchGuardRef = useRef({});
+
   // Hooks must run an unconditional, fixed number of times per render - see
   // MAX_BMS_SLOTS. Slots with no device assigned yet just get `path: null`,
   // which useBmsPackLive treats as "nothing to subscribe to" rather than
@@ -423,7 +447,40 @@ export default function BMSDashboard({ onSoftwareVersionChange, onOpenWeather })
           const rawKey = [m.fb, ...(m.legacy ?? [])].find((k) => pack.remoteSettings[k] !== undefined);
           if (rawKey === undefined) continue;
           const raw = pack.remoteSettings[rawKey];
-          patch[dashKey] = m.toDash ? m.toDash(raw) : raw;
+          const value = m.toDash ? m.toDash(raw) : raw;
+
+          // Charge/Discharge write-guard (see chargeSwitchGuardRef above) -
+          // every other field keeps the old unconditional apply-on-every-
+          // poll behavior unchanged.
+          if (dashKey === "charge" || dashKey === "discharge") {
+            if (!chargeSwitchGuardRef.current[pack.id]) chargeSwitchGuardRef.current[pack.id] = {};
+            const guard = chargeSwitchGuardRef.current[pack.id];
+            const pending = guard[dashKey];
+            if (pending !== undefined) {
+              if (value === pending) {
+                // Our own write round-tripped through Firebase - confirmed,
+                // stop guarding this key.
+                guard[dashKey] = undefined;
+              } else {
+                // A poll that started before our write landed, reading the
+                // old value - ignore it rather than let it clobber what the
+                // user just set. Not applied to `patch` at all, so `next`
+                // keeps whatever's already there.
+                logSwitchChange(dashKey, "Ignored invalid overwrite (stale poll racing a pending write)", value);
+                continue;
+              }
+            } else if (next[pack.id] && value !== next[pack.id][dashKey]) {
+              // No write of ours is pending, yet Firebase now holds a
+              // different value than what's on screen - the only other
+              // party that can write .../settings/charge|discharge is the
+              // BMS/bridge itself (e.g. a protection trip, or a reboot
+              // echoing its real MOSFET state), so this is a legitimate
+              // externally-sourced change, not a race - accept it.
+              logSwitchChange(dashKey, "Changed by BMS", value);
+            }
+          }
+
+          patch[dashKey] = value;
         }
         next[pack.id] = { ...next[pack.id], ...patch };
       }
@@ -489,6 +546,14 @@ export default function BMSDashboard({ onSoftwareVersionChange, onOpenWeather })
   // called (e.g. a modal left open from before the toggle flipped).
   const saveSetting = (key, value) => {
     if (active.isLive && active.adminDisabled) return;
+    if (key === "charge" || key === "discharge") {
+      // Arm the write-guard BEFORE the Firebase write goes out, so a poll
+      // that lands between now and the write actually completing can't
+      // clobber this - see chargeSwitchGuardRef above and the sync effect.
+      if (!chargeSwitchGuardRef.current[activeBmsId]) chargeSwitchGuardRef.current[activeBmsId] = {};
+      chargeSwitchGuardRef.current[activeBmsId][key] = value;
+      logSwitchChange(key, "Changed by USER", value);
+    }
     setSettingsByPack((s) => ({
       ...s,
       [activeBmsId]: { ...s[activeBmsId], [key]: value },
