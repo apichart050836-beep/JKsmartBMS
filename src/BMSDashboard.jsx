@@ -848,6 +848,8 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
                timeToFullCharge={active.timeToFullCharge}
                recommendedChargeCurrentA={recommendedChargeCurrentA}
                recommendedDischargeCurrentA={recommendedDischargeCurrentA}
+               configuredChargeCurrentA={settings.contChgCurr}
+               configuredDischargeCurrentA={settings.contDsgCurr}
                history={active.powerHistory}
              />
                                       </div>

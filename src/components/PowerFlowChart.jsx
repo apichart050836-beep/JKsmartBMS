@@ -17,6 +17,8 @@ export function PowerFlowChart({
     timeToFullCharge,
     recommendedChargeCurrentA,
     recommendedDischargeCurrentA,
+    configuredChargeCurrentA,
+    configuredDischargeCurrentA,
     history = [],
 }) {
     // 1. คำนวณ Power Realtime (P = V * I)
@@ -105,6 +107,14 @@ export function PowerFlowChart({
                             </span>
                         </div>
                     )}
+                    {typeof configuredChargeCurrentA === "number" && (
+                        <div className="mt-1.5 flex justify-between text-[11px] text-[var(--muted-foreground)]">
+                            <span>ค่าชาร์จที่ตั้งไว้</span>
+                            <span className="font-semibold text-[var(--foreground)] tabular-nums">
+                                {configuredChargeCurrentA.toFixed(1)} A
+                            </span>
+                        </div>
+                    )}
                 </div>
 
                 {/* Card 2: Main Power Hub Center */}
@@ -178,6 +188,14 @@ export function PowerFlowChart({
                             <span>แนะนำไม่เกิน (0.5C)</span>
                             <span className="font-semibold text-[var(--foreground)] tabular-nums">
                                 {recommendedDischargeCurrentA.toFixed(1)} A
+                            </span>
+                        </div>
+                    )}
+                    {typeof configuredDischargeCurrentA === "number" && (
+                        <div className="mt-1.5 flex justify-between text-[11px] text-[var(--muted-foreground)]">
+                            <span>ค่าดิสชาร์จที่ตั้งไว้</span>
+                            <span className="font-semibold text-[var(--foreground)] tabular-nums">
+                                {configuredDischargeCurrentA.toFixed(1)} A
                             </span>
                         </div>
                     )}
