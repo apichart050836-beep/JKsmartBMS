@@ -14,8 +14,12 @@ function BmsTabs({ tabs, activeId, onSelect }) {
         // Scrolls horizontally within itself once there are more tabs than
         // fit (4+ devices on a phone-width screen) instead of blowing out
         // the whole page's width - max-w-full bounds it to whatever the
-        // parent flex row actually allocates.
-        <div className="min-w-0 max-w-full overflow-x-auto">
+        // parent flex row actually allocates. overscroll-x-contain
+        // suppresses the browser's native overscroll "glow"/bounce
+        // indicator at the edges (showed as curved bracket-like lines on
+        // mobile once this became scrollable) - purely a rendering
+        // artifact of the scroll container itself, not a real border.
+        <div className="min-w-0 max-w-full overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <div className="inline-flex items-center gap-1 rounded-2xl bg-[var(--muted)]/70 p-1.5 ring-1 ring-[var(--border)]/50 backdrop-blur-xs">
             {tabs.map((tab) => {
                 const isActive = tab.id === activeId;
