@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Search,
   Eye,
@@ -12,6 +12,7 @@ import {
   ChevronDown,
   ChevronRight,
   Megaphone,
+  UploadCloud,
 } from "lucide-react";
 import { api } from "./lib/apiClient.js";
 import { useAdminHubs } from "./hooks/useAdminHubs.js";
@@ -20,6 +21,7 @@ import { Modal } from "./components/Modal.jsx";
 import { LiveDebugPanel } from "./components/LiveDebugPanel.jsx";
 import { AdminStatusPreview } from "./components/AdminStatusPreview.jsx";
 import { AnnounceModal } from "./components/AnnounceModal.jsx";
+import { FirmwareUploadModal } from "./components/FirmwareUploadModal.jsx";
 
 const EXPIRING_WITHIN_DAYS = 14;
 const FILTERS = [
@@ -250,6 +252,13 @@ export default function AdminMonitor() {
   const [statusView, setStatusView] = useState(null); // { path, label }
   const [expandedHubs, setExpandedHubs] = useState(() => new Set());
   const [showAnnounce, setShowAnnounce] = useState(false);
+  const [showFirmwareUpload, setShowFirmwareUpload] = useState(false);
+  const [latestRelease, setLatestRelease] = useState(null);
+
+  useEffect(() => {
+    api.latestFirmware().then((r) => setLatestRelease(r.release)).catch(() => {});
+    // Re-check after the upload modal closes, in case a new one just went out.
+  }, [showFirmwareUpload]);
 
   const filteredRows = rows.filter((row) => {
     const needle = search.trim().toLowerCase();
@@ -294,7 +303,15 @@ export default function AdminMonitor() {
 
   return (
     <div className="mx-auto max-w-6xl px-3 py-4 sm:px-5 sm:py-6 md:px-7">
-      <div className="mb-4 flex justify-end">
+      <div className="mb-4 flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={() => setShowFirmwareUpload(true)}
+          className="inline-flex items-center gap-2 rounded-xl bg-[var(--card)] px-4 py-2 text-sm font-semibold text-[var(--foreground)] shadow-sm ring-1 ring-[var(--border)] transition-all hover:bg-[var(--muted)] active:scale-95"
+        >
+          <UploadCloud className="size-4" />
+          Firmware Update
+        </button>
         <button
           type="button"
           onClick={() => setShowAnnounce(true)}
@@ -396,6 +413,10 @@ export default function AdminMonitor() {
 
       <Modal open={showAnnounce} onClose={() => setShowAnnounce(false)} title="แจ้ง Update" maxWidthClass="max-w-md">
         <AnnounceModal onClose={() => setShowAnnounce(false)} />
+      </Modal>
+
+      <Modal open={showFirmwareUpload} onClose={() => setShowFirmwareUpload(false)} title="Firmware Update" maxWidthClass="max-w-md">
+        <FirmwareUploadModal onClose={() => setShowFirmwareUpload(false)} currentRelease={latestRelease} />
       </Modal>
     </div>
   );

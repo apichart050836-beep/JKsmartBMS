@@ -7,10 +7,77 @@ import HomePage from "./HomePage.jsx";
 import { ThemeRoot } from "./components/ThemeRoot.jsx";
 import { ThemeProvider } from "./context/ThemeContext.jsx";
 import { AuthProvider, useAuth } from "./context/AuthContext.jsx";
-import { HubDataProvider } from "./context/HubDataContext.jsx";
+import { HubDataProvider, useHubData } from "./context/HubDataContext.jsx";
 import { LogoutModal } from "./components/LogoutModal.jsx";
 import { VersionCheckModal } from "./components/VersionCheckModal.jsx";
 import { FirmwareUpdateToast } from "./components/FirmwareUpdateToast.jsx";
+import { FirmwareReleaseModal } from "./components/FirmwareReleaseModal.jsx";
+
+// Badge next to the Dashboard pill + its two popups (manual check, and the
+// auto "new firmware" notice). A separate component (not inline in
+// AuthedApp) because it needs useHubData() for the firmware-release state,
+// and AuthedApp itself renders <HubDataProvider> as its OWN output - a
+// component can't consume context it provides in the same render, only a
+// child of that render can. Same reasoning as BMSDashboard owning the
+// weather feature instead of AuthedApp.
+function UpdateBadge({ deviceVersions }) {
+  const { firmwareRelease, firmwareIsNew, acknowledgeFirmwareRelease } = useHubData();
+  const [showVersionModal, setShowVersionModal] = useState(false);
+  const [manualUpdateToast, setManualUpdateToast] = useState(null);
+  // "เตือนภายหลัง"/close only hides the auto-popup for this session (not
+  // acknowledged) - it reappears on the next load, per its own label.
+  const [autoPopupDismissedThisSession, setAutoPopupDismissedThisSession] = useState(false);
+
+  function showUpdateToast() {
+    setManualUpdateToast({ deviceLabel: deviceVersions.deviceLabel, version: deviceVersions.software });
+    setTimeout(() => setManualUpdateToast(null), 6000);
+  }
+
+  if (!deviceVersions.software) return null;
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setShowVersionModal(true)}
+        title="ตรวจสอบอัพเดทเฟิร์มแวร์"
+        className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-semibold transition-colors ${
+          firmwareIsNew
+            ? "bg-[var(--brand)] text-white hover:opacity-90"
+            : "bg-[var(--muted)] text-[var(--muted-foreground)] hover:bg-[var(--border)] hover:text-[var(--foreground)]"
+        }`}
+      >
+        <Cpu className="size-3" />
+        Update
+        {firmwareIsNew && <span className="ml-0.5 size-1.5 rounded-full bg-white" />}
+      </button>
+
+      <VersionCheckModal
+        open={showVersionModal}
+        onClose={() => setShowVersionModal(false)}
+        deviceLabel={deviceVersions.deviceLabel}
+        softwareVersion={deviceVersions.software}
+        hardwareVersion={deviceVersions.hardware}
+        pendingRelease={firmwareIsNew ? firmwareRelease : null}
+        onUpdate={() => {
+          setShowVersionModal(false);
+          acknowledgeFirmwareRelease();
+          showUpdateToast();
+        }}
+      />
+      <FirmwareReleaseModal
+        open={firmwareIsNew && !autoPopupDismissedThisSession}
+        release={firmwareRelease}
+        onUpdate={() => {
+          acknowledgeFirmwareRelease();
+          showUpdateToast();
+        }}
+        onRemindLater={() => setAutoPopupDismissedThisSession(true)}
+      />
+      <FirmwareUpdateToast update={manualUpdateToast} />
+    </>
+  );
+}
 
 const PAGES = [
   // Dashboard (live per-device telemetry + Configuration) is user-role only -
@@ -35,12 +102,6 @@ function AuthedApp() {
   // up via a callback since the badge/button it's shown next to lives here,
   // outside BMSDashboard itself.
   const [deviceVersions, setDeviceVersions] = useState({ software: null, hardware: null, deviceLabel: null });
-  const [showVersionModal, setShowVersionModal] = useState(false);
-  // Reuses FirmwareUpdateToast (already built for the auto-detected
-  // version-change case inside BMSDashboard) for a manual "Update" press in
-  // the version popup - same component/animation, a separate toast instance
-  // since that one's state is local to BMSDashboard.
-  const [manualUpdateToast, setManualUpdateToast] = useState(null);
   const pages = PAGES.filter((p) => (p.adminOnly ? user.role === "admin" : !p.userOnly || user.role !== "admin"));
   const activePage = pages.find((p) => p.id === page) ? page : defaultPage;
 
@@ -67,17 +128,7 @@ function AuthedApp() {
               </button>
             );
           })}
-          {activePage === "dashboard" && deviceVersions.software && (
-            <button
-              type="button"
-              onClick={() => setShowVersionModal(true)}
-              title="ตรวจสอบอัพเดทเฟิร์มแวร์"
-              className="inline-flex items-center gap-1 rounded-lg bg-[var(--muted)] px-2 py-1 text-[10px] font-semibold text-[var(--muted-foreground)] transition-colors hover:bg-[var(--border)] hover:text-[var(--foreground)]"
-            >
-              <Cpu className="size-3" />
-              Update
-            </button>
-          )}
+          {activePage === "dashboard" && <UpdateBadge deviceVersions={deviceVersions} />}
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-[var(--muted-foreground)]">{user.email}</span>
@@ -110,19 +161,6 @@ function AuthedApp() {
           logout();
         }}
       />
-      <VersionCheckModal
-        open={showVersionModal}
-        onClose={() => setShowVersionModal(false)}
-        deviceLabel={deviceVersions.deviceLabel}
-        softwareVersion={deviceVersions.software}
-        hardwareVersion={deviceVersions.hardware}
-        onUpdate={() => {
-          setShowVersionModal(false);
-          setManualUpdateToast({ deviceLabel: deviceVersions.deviceLabel, version: deviceVersions.software });
-          setTimeout(() => setManualUpdateToast(null), 6000);
-        }}
-      />
-      <FirmwareUpdateToast update={manualUpdateToast} />
     </HubDataProvider>
   );
 }

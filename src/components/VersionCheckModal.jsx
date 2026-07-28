@@ -10,7 +10,15 @@ import { Cpu, RefreshCw } from "lucide-react";
  * reuses the same firmware-update loading animation (FirmwareUpdateToast)
  * already built for the auto-detected version-change case.
  */
-export function VersionCheckModal({ open, onClose, deviceLabel, softwareVersion, hardwareVersion, onUpdate }) {
+export function VersionCheckModal({
+  open,
+  onClose,
+  deviceLabel,
+  softwareVersion,
+  hardwareVersion,
+  onUpdate,
+  pendingRelease,
+}) {
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
@@ -53,6 +61,13 @@ export function VersionCheckModal({ open, onClose, deviceLabel, softwareVersion,
                 <p className="mt-0.5 font-bold tabular-nums text-[var(--foreground)]">{hardwareVersion ?? "-"}</p>
               </div>
             </div>
+
+            {pendingRelease && (
+              <div className="mt-3 rounded-xl bg-[var(--brand-10)] p-3 text-left text-xs">
+                <p className="font-bold text-[var(--brand)]">🆕 มีเวอร์ชันใหม่: v{pendingRelease.version}</p>
+                <p className="mt-0.5 text-[var(--muted-foreground)]">{pendingRelease.filename}</p>
+              </div>
+            )}
 
             <div className="mt-5 flex flex-col gap-2">
               <button

@@ -11,6 +11,7 @@ import hubsRoutes from "./routes/hubs.js";
 import adminRoutes from "./routes/admin.js";
 import historyRoutes from "./routes/history.js";
 import { createAnnouncementsRouter } from "./routes/announcements.js";
+import { createFirmwareRouter } from "./routes/firmware.js";
 import { attachRealtime } from "./realtime.js";
 import { startTelemetryLogger } from "./telemetryLogger.js";
 import { isAllowedOrigin } from "./corsOrigin.js";
@@ -51,6 +52,7 @@ app.get("/api/health", (_req, res) => res.json({ ok: true }));
 const httpServer = createServer(app);
 const io = attachRealtime(httpServer);
 app.use("/api/announcements", createAnnouncementsRouter(io));
+app.use("/api/firmware", createFirmwareRouter(io));
 
 // Serves the built frontend (npm run build -> ../dist) from this same
 // process/port - a single deployable service instead of two separate

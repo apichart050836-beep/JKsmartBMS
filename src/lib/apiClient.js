@@ -60,6 +60,24 @@ export const api = {
   sendAnnouncement: (message, category) =>
     request("/api/announcements", { method: "POST", body: JSON.stringify({ message, category }) }),
   latestAnnouncement: () => request("/api/announcements/latest"),
+  // Raw-body upload, not JSON - can't go through request()'s
+  // Content-Type: application/json + JSON.stringify(body) default.
+  uploadFirmware: async (version, filename, file) => {
+    const res = await fetch(
+      `${API_BASE}/api/firmware?version=${encodeURIComponent(version)}&filename=${encodeURIComponent(filename)}`,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: file,
+      }
+    );
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || `Request failed (${res.status})`);
+    return body;
+  },
+  latestFirmware: () => request("/api/firmware/latest"),
+  firmwareDownloadUrl: (id) => `${API_BASE}/api/firmware/${id}/download`,
 };
 
 export const API_BASE_URL = API_BASE;

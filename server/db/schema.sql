@@ -45,3 +45,21 @@ CREATE TABLE IF NOT EXISTS announcements (
   category   TEXT,
   created_at INTEGER NOT NULL
 );
+
+-- ESP32 firmware .bin files an admin has published from Admin Monitor's
+-- "Firmware Update" panel - stored as a BLOB here rather than a bare file
+-- on disk, same tradeoff telemetry_log already makes (see db.js's comment
+-- on Render's Free-tier disk being ephemeral): this table doesn't survive
+-- a redeploy/restart either unless DB_PATH points at a real attached
+-- persistent disk. Pressing "Update" on the dashboard (see server/routes/
+-- firmware.js) is acknowledge-only - nothing here ever gets pushed to a
+-- physical ESP32, there's no OTA transport in this app.
+CREATE TABLE IF NOT EXISTS firmware_releases (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  version     TEXT NOT NULL,
+  filename    TEXT NOT NULL,
+  size_bytes  INTEGER NOT NULL,
+  data        BLOB NOT NULL,
+  uploaded_by TEXT NOT NULL,
+  uploaded_at INTEGER NOT NULL
+);
