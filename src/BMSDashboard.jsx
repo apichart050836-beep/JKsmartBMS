@@ -459,12 +459,18 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
   const dailyEnergy = useDailyEnergy(activeConfig.hubId, activeConfig.bmsKey);
   const activeEnergy = { chargedAh: dailyEnergy.chargedAh, dischargedAh: dailyEnergy.dischargedAh };
   const activeAlarms = computeAlarms(active, settings);
+  // info.jk_mac_address is the real JK BMS unit's own MAC (read over BLE),
+  // separate from activeConfig.deviceKey (the ESP32 bridge's own Firebase
+  // node key) - shows the actual battery pack's identity instead of the
+  // WiFi bridge's, when the device has reported it. Confirmed live only
+  // some devices report this field yet, so falls back to the bridge key
+  // for the rest rather than showing nothing.
+  const activeDeviceMac = active.info?.jk_mac_address || activeConfig.deviceKey;
   // Prefer the custom name synced from settings.my_custom_name, then the
-  // raw ESP32/device id itself - always shows *something* identifiable
-  // rather than falling back to a MAC that's no longer meaningfully
-  // available per-slot now that devices are discovered, not individually
-  // hardcoded.
-  const activeDeviceLabel = settings.myCustomName || activeConfig.deviceKey;
+  // device's real MAC - always shows *something* identifiable rather than
+  // falling back to a MAC that's no longer meaningfully available per-slot
+  // now that devices are discovered, not individually hardcoded.
+  const activeDeviceLabel = settings.myCustomName || activeDeviceMac;
 
   // Pull real Configuration values back from Firebase for every live pack,
   // in real time - `.../settings` is the same node saveSetting() writes to,
@@ -774,7 +780,12 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
         <FirmwareUpdateToast update={firmwareUpdate} />
         {/* Top Bar: BMS 1-N (left) + System Log / Configuration (right) */}
         <TopBar
-          tabs={slots.filter((s) => s.live).map((s) => ({ id: s.id, name: s.name, mac: s.deviceKey }))}
+          tabs={slots
+            .filter((s) => s.live)
+            .map((s) => {
+              const pack = packs.find((p) => p.id === s.id);
+              return { id: s.id, name: s.name, mac: pack?.info?.jk_mac_address || s.deviceKey };
+            })}
           activeBmsId={activeBmsId}
           onSelectBms={setActiveBmsId}
           onOpenWeather={() => {
@@ -803,7 +814,7 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
             {/* JK BMS Control Center - Main Console Panel (Power & Energy + Remaining & Health) */}
             <SystemHero
               deviceLabel={activeDeviceLabel}
-              deviceMac={activeConfig.deviceKey}
+              deviceMac={activeDeviceMac}
               hubAccount={active.isLive ? activeConfig.hubId : undefined}
               isOnline={isOnline}
               onRefresh={() => window.location.reload()}
