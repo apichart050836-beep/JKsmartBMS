@@ -40,7 +40,7 @@ function UpdateBadge({ deviceVersions }) {
       <button
         type="button"
         onClick={() => setShowVersionModal(true)}
-        title="ตรวจสอบอัพเดทเฟิร์มแวร์"
+        title="ตรวจสอบอัพเดทเฟิร์มแวร์ ESP32"
         className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-semibold transition-colors ${
           firmwareIsNew
             ? "bg-[var(--brand)] text-white shadow-sm hover:opacity-90"

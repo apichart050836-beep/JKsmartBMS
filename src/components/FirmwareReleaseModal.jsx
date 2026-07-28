@@ -21,7 +21,7 @@ export function FirmwareReleaseModal({ open, release, onUpdate, onRemindLater })
           <div className="mx-auto mb-3 flex size-16 items-center justify-center rounded-full bg-white/15 ring-4 ring-white/20">
             <Sparkles className="size-7" />
           </div>
-          <h3 className="text-lg font-extrabold">มีเฟิร์มแวร์เวอร์ชันใหม่!</h3>
+          <h3 className="text-lg font-extrabold">มีเฟิร์มแวร์ ESP32 เวอร์ชันใหม่!</h3>
           <p className="mt-1 text-sm text-white/85">v{release.version}</p>
         </div>
 

@@ -39,7 +39,7 @@ export function VersionCheckModal({
         <div className="mx-auto mb-4 flex size-16 items-center justify-center rounded-full bg-[var(--brand-10)]">
           <Cpu className={`size-7 text-[var(--brand)] ${checking ? "animate-pulse" : ""}`} />
         </div>
-        <h3 className="text-lg font-bold text-[var(--foreground)]">ตรวจสอบอัพเดทเฟิร์มแวร์</h3>
+        <h3 className="text-lg font-bold text-[var(--foreground)]">ตรวจสอบอัพเดทเฟิร์มแวร์ ESP32</h3>
         {deviceLabel && <p className="mt-1 text-xs text-[var(--muted-foreground)]">{deviceLabel}</p>}
 
         {checking ? (

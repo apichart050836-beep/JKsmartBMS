@@ -310,7 +310,7 @@ export default function AdminMonitor() {
           className="inline-flex items-center gap-2 rounded-xl bg-[var(--card)] px-4 py-2 text-sm font-semibold text-[var(--foreground)] shadow-sm ring-1 ring-[var(--border)] transition-all hover:bg-[var(--muted)] active:scale-95"
         >
           <UploadCloud className="size-4" />
-          Firmware Update
+          ESP32 Firmware Update
         </button>
         <button
           type="button"
@@ -415,7 +415,7 @@ export default function AdminMonitor() {
         <AnnounceModal onClose={() => setShowAnnounce(false)} />
       </Modal>
 
-      <Modal open={showFirmwareUpload} onClose={() => setShowFirmwareUpload(false)} title="Firmware Update" maxWidthClass="max-w-md">
+      <Modal open={showFirmwareUpload} onClose={() => setShowFirmwareUpload(false)} title="ESP32 Firmware Update" maxWidthClass="max-w-md">
         <FirmwareUploadModal onClose={() => setShowFirmwareUpload(false)} currentRelease={latestRelease} />
       </Modal>
     </div>
