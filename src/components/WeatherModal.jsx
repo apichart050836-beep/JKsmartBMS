@@ -1,7 +1,7 @@
 import React from "react";
 import { weatherIcon } from "../lib/weatherService.js";
 
-export function WeatherModal({ open, onClose, weather, loading, error, location, onRetry }) {
+export function WeatherModal({ open, onClose, weather, loading, error, location, onRetry, onChangeLocation }) {
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" onClick={onClose}>
@@ -11,14 +11,26 @@ export function WeatherModal({ open, onClose, weather, loading, error, location,
       >
         <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
           <h3 className="text-sm font-bold text-[var(--foreground)]">☀️ สภาพอากาศปัจจุบัน</h3>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="rounded-full p-1 text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
-          >
-            ✕
-          </button>
+          <div className="flex items-center gap-1">
+            {onChangeLocation && (
+              <button
+                type="button"
+                onClick={onChangeLocation}
+                title="เปลี่ยนตำแหน่งติดตั้ง"
+                className="rounded-full p-1.5 text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
+              >
+                📍
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              className="rounded-full p-1 text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
+            >
+              ✕
+            </button>
+          </div>
         </div>
 
         <div className="p-5">
@@ -85,6 +97,15 @@ export function WeatherModal({ open, onClose, weather, loading, error, location,
               <p className="mt-1 text-center text-[10px] text-[var(--muted-foreground)]">
                 อัปเดตล่าสุด {new Date(weather.updatedAt).toLocaleTimeString("th-TH")}
               </p>
+              {onChangeLocation && (
+                <button
+                  type="button"
+                  onClick={onChangeLocation}
+                  className="mx-auto mt-3 block text-[11px] font-semibold text-[var(--brand)] hover:underline"
+                >
+                  📍 เปลี่ยนตำแหน่งติดตั้ง
+                </button>
+              )}
             </>
           )}
         </div>

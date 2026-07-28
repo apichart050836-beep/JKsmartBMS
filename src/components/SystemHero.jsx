@@ -111,7 +111,8 @@ export function SystemHero({
 
                 {/* Status Switches Indicators */}
                 <div className="flex items-center gap-2">
-                    {/* Charge Status */}
+                    {/* Charge Status - driven by charging_state (via chargeMOS,
+                        see useBmsPackLive.js), per explicit instruction. */}
                     <span className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold ${chargeMOS ? "bg-emerald-500/10 text-emerald-500" : "bg-zinc-500/10 text-zinc-400"}`}>
                         <Zap className="size-3.5" />
                         <span>

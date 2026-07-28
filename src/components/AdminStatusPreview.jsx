@@ -118,12 +118,9 @@ export function AdminStatusPreview({ path }) {
   const packVoltage = pick(status, "totalVoltage", "battery_voltage") ?? 0;
   const isCharging = current > 0;
   const isDischarging = current < 0;
-  // Was `charging_state` - confirmed live that field can disagree with
-  // charge_current/battery_power/charge_status (see useBmsPackLive.js's
-  // matching comment), so this now reuses the same real-current-sign basis
-  // as isCharging/isDischarging above instead of a second, less reliable
-  // read of essentially the same question.
-  const chargeMOS = isCharging;
+  // Charge ON/OFF badge reads charging_state directly, per explicit
+  // instruction (see useBmsPackLive.js's matching comment/revert).
+  const chargeMOS = !!pick(status, "charging_state", "charge");
   const dischargeMOS = !!status.discharge;
   const statusLabel = isCharging ? "Charging" : isDischarging ? "Discharging" : "Idle";
   const currentTone = isCharging ? "emerald" : isDischarging ? "amber" : "zinc";

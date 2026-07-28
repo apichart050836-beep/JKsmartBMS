@@ -43,7 +43,7 @@ export function VersionCheckModal({ open, onClose, deviceLabel, softwareVersion,
           <>
             <div className="mt-5 grid grid-cols-2 gap-2 rounded-xl bg-[var(--muted)] p-3 text-left text-xs">
               <div>
-                <p className="text-[var(--muted-foreground)]">Software Version</p>
+                <p className="text-[var(--muted-foreground)]">ESP32 Software</p>
                 <p className="mt-0.5 font-bold tabular-nums text-[var(--foreground)]">
                   {softwareVersion ? `v${softwareVersion}` : "-"}
                 </p>

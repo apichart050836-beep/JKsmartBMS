@@ -4,7 +4,18 @@
 // free tier is designed for exactly this kind of direct browser call.
 const API_KEY = import.meta.env.VITE_OPENWEATHER_KEY;
 const BASE_URL = "https://api.openweathermap.org/data/2.5/weather";
-const GEO_BASE_URL = "https://api.openweathermap.org/geo/1.0";
+// Location search/reverse-geocoding uses Nominatim (OpenStreetMap), not
+// OpenWeatherMap's own Geocoding API - confirmed live that OpenWeatherMap's
+// geocoder only resolves city/province-level results ("เชียงใหม่" ->
+// "Chiang Mai City Municipality"), too coarse for pinpointing a specific
+// installation per explicit request (ตำบล/อำเภอ, not just จังหวัด).
+// Nominatim indexes full OSM address hierarchy including Thai sub-district/
+// district boundaries, is free, and needs no API key - fetchWeather above
+// still uses OpenWeatherMap for the actual forecast data, only the search/
+// reverse-lookup step moved. Nominatim's usage policy caps this at light,
+// manual (not bulk/automated) use, which is exactly what a one-off "find my
+// installation" search is.
+const NOMINATIM_BASE_URL = "https://nominatim.openstreetmap.org";
 
 export const WEATHER_ICONS = {
   Clear: "☀️",
@@ -55,19 +66,20 @@ export async function fetchWeather(latitude, longitude) {
 }
 
 // Text-search for the Installation Location setup modal's "ค้นหาชื่อสถานที่"
-// field - OpenWeatherMap's free Geocoding API, same key as fetchWeather.
+// field - display_name is Nominatim's full address hierarchy (e.g.
+// "ตำบลสุเทพ, อำเภอเมืองเชียงใหม่, เชียงใหม่, ..."), kept as-is rather than
+// trimmed to province, since that hierarchy is the whole point here.
 export async function searchLocations(query) {
-  if (!API_KEY) throw new Error("NO_API_KEY");
   const q = query.trim();
   if (!q) return [];
-  const url = `${GEO_BASE_URL}/direct?q=${encodeURIComponent(q)}&limit=5&appid=${API_KEY}`;
+  const url = `${NOMINATIM_BASE_URL}/search?q=${encodeURIComponent(q)}&format=json&limit=6&addressdetails=1&accept-language=th`;
   const res = await fetch(url);
   if (!res.ok) throw new Error("API_ERROR");
   const data = await res.json();
   return data.map((d) => ({
-    name: [d.name, d.state, d.country].filter(Boolean).join(", "),
-    lat: d.lat,
-    lng: d.lon,
+    name: d.display_name,
+    lat: Number(d.lat),
+    lng: Number(d.lon),
   }));
 }
 
@@ -76,12 +88,10 @@ export async function searchLocations(query) {
 // numbers. Best-effort - callers should fall back to showing the raw
 // coordinates if this fails or returns nothing.
 export async function reverseGeocode(lat, lng) {
-  if (!API_KEY) throw new Error("NO_API_KEY");
-  const url = `${GEO_BASE_URL}/reverse?lat=${lat}&lon=${lng}&limit=1&appid=${API_KEY}`;
+  const url = `${NOMINATIM_BASE_URL}/reverse?lat=${lat}&lon=${lng}&format=json&accept-language=th`;
   const res = await fetch(url);
   if (!res.ok) throw new Error("API_ERROR");
   const data = await res.json();
-  const d = data[0];
-  if (!d) return null;
-  return [d.name, d.state, d.country].filter(Boolean).join(", ");
+  if (!data || data.error) return null;
+  return data.display_name ?? null;
 }

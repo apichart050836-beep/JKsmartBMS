@@ -29,7 +29,14 @@ export function InstallationLocationModal({ open, initialLocation, onSave, onClo
 
   // Start each open from whatever's currently saved (editing) or blank
   // (first-time setup) - not whatever was left over from the last time this
-  // modal happened to be open.
+  // modal happened to be open. Deliberately depends on `open` alone, not
+  // `initialLocation` - the caller's saved-location object gets a fresh
+  // reference on every parent re-render (BMSDashboard re-renders every 1s
+  // for its own clock), so depending on it here reran this reset on every
+  // tick, wiping out anything the user had just typed a moment after each
+  // keystroke. Firing once per open (using whatever initialLocation is
+  // current AT that moment) is what "start from the saved value" actually
+  // needs.
   useEffect(() => {
     if (!open) return;
     setName(initialLocation?.name ?? "");
@@ -38,7 +45,8 @@ export function InstallationLocationModal({ open, initialLocation, onSave, onClo
     setQuery("");
     setResults([]);
     setError(null);
-  }, [open, initialLocation]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   if (!open) return null;
 

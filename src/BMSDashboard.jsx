@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { ArrowUpRight, ArrowDownRight, Cable, RefreshCw, WifiOff, Clock, MessageCircleQuestion } from "lucide-react";
 import { clamp, statusTone, voltDiffToneWithThreshold } from "./lib/tone.js";
 import { useBmsPackLive } from "./hooks/useBmsPackLive.js";
@@ -345,7 +345,17 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
   // session (they only ever have the one hub), so the first slot with a
   // real device is enough to identify it.
   const weatherHubId = devices[0]?.hubId ?? null;
-  const savedLocation = weatherHubId ? hubs[weatherHubId]?.location ?? null : null;
+  const rawSavedLocation = weatherHubId ? hubs[weatherHubId]?.location ?? null : null;
+  // Memoized by actual value, not object identity - `hubs` is a fresh
+  // object from every socket/poll update, including BMSDashboard's own 1s
+  // clock re-renders, so an unmemoized `savedLocation` got a new reference
+  // constantly. That fed straight into InstallationLocationModal's reset
+  // effect as a changing dependency, wiping out anything the user had just
+  // typed into the search box a moment after each keystroke.
+  const savedLocation = useMemo(
+    () => (rawSavedLocation ? { name: rawSavedLocation.name, lat: rawSavedLocation.lat, lng: rawSavedLocation.lng } : null),
+    [rawSavedLocation?.name, rawSavedLocation?.lat, rawSavedLocation?.lng]
+  );
   const weatherLoc = useWeatherLocation(weatherHubId, savedLocation);
 
   // Each pack keeps its own configuration, edited via the Configuration
@@ -984,6 +994,13 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
         error={weatherLoc.error}
         location={savedLocation}
         onRetry={() => weatherLoc.loadWeather()}
+        onChangeLocation={() => {
+          // Same overlay z-index as InstallationLocationModal - close this
+          // one first so opening the setup modal from inside it doesn't
+          // just stack invisibly underneath (same reasoning as Config/Log).
+          setShowWeatherModal(false);
+          weatherLoc.setShowSetupModal(true);
+        }}
       />
 
       <Modal open={showOfflineModal} onClose={() => setOfflineDismissed(true)} title="อุปกรณ์หลุดการเชื่อมต่อ">
