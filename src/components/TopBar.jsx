@@ -1,13 +1,13 @@
 import React from "react";
-import { Settings, LogOut, BatteryFull, Sun, Moon } from "lucide-react"; // เพิ่ม LogOut เข้าไป
+import { Settings, LogOut, Sun, Moon } from "lucide-react"; // เพิ่ม LogOut เข้าไป
 import { useTheme } from "../context/ThemeContext.jsx";
 import { WeatherButton } from "./WeatherButton.jsx";
 
 /**
  * BmsTabs: Segmented tab bar with smooth active animation & hover feedback -
- * active tab gets a brand gradient, glow, a live-pulse dot (every rendered
- * tab is by construction a real assigned device, see buildBmsSlots' `live`
- * filter in BMSDashboard.jsx), and a battery glyph.
+ * active tab gets a brand gradient, glow, and a live-pulse dot (every
+ * rendered tab is by construction a real assigned device, see
+ * buildBmsSlots' `live` filter in BMSDashboard.jsx).
  */
 function BmsTabs({ tabs, activeId, onSelect }) {
     return (
@@ -33,7 +33,6 @@ function BmsTabs({ tabs, activeId, onSelect }) {
                         {isActive && (
                             <span className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/25 to-transparent group-hover:animate-[shimmer_1s_ease]" />
                         )}
-                        <BatteryFull className={`size-3.5 ${isActive ? "text-white" : "text-[var(--muted-foreground)]"}`} />
                         <span className="relative">{tab.name}</span>
                         <span className="relative flex size-1.5">
                             <span
