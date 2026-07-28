@@ -45,20 +45,35 @@ export function useBmsPackLive(config) {
   const adminDisabled = !adminEnabled;
   const connected = !!raw && adminEnabled;
 
-  // lastUpdateAt (used for the Online/Offline check) only advances on a
-  // genuine change to the status JSON - confirmed live (2026-07-27, BLE
-  // physically unplugged) that jkbms-bridge.yaml stops writing to Firebase
-  // entirely when the BLE link drops, rather than re-pushing the last known
-  // values on a heartbeat - so the value really does freeze byte-for-byte
-  // the moment the link dies, and our own 5s backend poll would otherwise
-  // keep re-delivering that frozen snapshot and masking the disconnect
-  // forever. Log/power-history entries share this same dedup (a duplicate
-  // row for an unchanged reading isn't useful either).
+  // lastUpdateAt (used for the Online/Offline check) advances on
+  // info.uptime_seconds actually increasing, per explicit instruction - a
+  // live device's own seconds-since-boot counter only ever climbs, so it's
+  // a direct, unambiguous "this is a fresh reading" signal rather than an
+  // indirect one. Confirmed live (2026-07-27, BLE physically unplugged)
+  // that jkbms-bridge.yaml stops writing to Firebase entirely when the BLE
+  // link drops rather than re-pushing a heartbeat, so uptime_seconds really
+  // does freeze the moment the link dies, and our own 5s backend poll would
+  // otherwise keep re-delivering that frozen snapshot and masking the
+  // disconnect forever. Falls back to the previous whole-status-JSON diff
+  // for a device that isn't reporting uptime_seconds at all (older bridge
+  // firmware), so such a device doesn't end up permanently "offline"
+  // instead. Log/power-history entries share this same freshness gate (a
+  // duplicate row for an unchanged reading isn't useful either).
+  const lastUptimeRef = useRef(null);
   useEffect(() => {
     if (!connected) return;
-    const statusJson = JSON.stringify(status);
-    if (lastStatusJsonRef.current === statusJson) return;
-    lastStatusJsonRef.current = statusJson;
+    const uptime = info.uptime_seconds;
+    let isFresh;
+    if (typeof uptime === "number") {
+      const prevUptime = lastUptimeRef.current;
+      isFresh = prevUptime == null || uptime > prevUptime;
+      lastUptimeRef.current = uptime;
+    } else {
+      const statusJson = JSON.stringify(status);
+      isFresh = lastStatusJsonRef.current !== statusJson;
+      lastStatusJsonRef.current = statusJson;
+    }
+    if (!isFresh) return;
 
     setLastUpdateAt(Date.now());
 
@@ -93,7 +108,7 @@ export function useBmsPackLive(config) {
       ].slice(0, LOG_LEN)
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, connected]);
+  }, [status, info, connected]);
 
   const cells = useMemo(
     () => (pick(status, "cellVoltages", "cell_voltages") ?? []).filter((v) => v > 0),

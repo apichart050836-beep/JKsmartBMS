@@ -13,6 +13,7 @@ export function FirmwareUploadModal({ onClose, currentRelease }) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
   const [done, setDone] = useState(false);
+  const [gitWarning, setGitWarning] = useState(null);
 
   function pickFile(e) {
     const f = e.target.files?.[0];
@@ -30,9 +31,16 @@ export function FirmwareUploadModal({ onClose, currentRelease }) {
     setUploading(true);
     setError(null);
     try {
-      await api.uploadFirmware(version.trim(), file.name, file);
+      const result = await api.uploadFirmware(version.trim(), file.name, file);
       setDone(true);
-      setTimeout(onClose, 900);
+      if (result.gitError) {
+        // Publishing/notifying still fully succeeded (that's DB-backed, see
+        // server/routes/firmware.js) - only the git-backed durable copy
+        // failed, so this is a warning to fix later, not a failure to retry.
+        setGitWarning(result.gitError);
+      } else {
+        setTimeout(onClose, 900);
+      }
     } catch (err) {
       setError(err.message || "อัพโหลดไม่สำเร็จ");
     } finally {
@@ -74,6 +82,12 @@ export function FirmwareUploadModal({ onClose, currentRelease }) {
       </div>
 
       {error && <p className="text-xs font-semibold text-[var(--critical)]">{error}</p>}
+      {gitWarning && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
+          <p className="font-bold">เผยแพร่สำเร็จ แต่ยังไม่ได้บันทึกลง GitHub</p>
+          <p className="mt-0.5">{gitWarning}</p>
+        </div>
+      )}
 
       <div className="flex justify-end gap-2">
         <button

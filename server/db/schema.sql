@@ -63,3 +63,19 @@ CREATE TABLE IF NOT EXISTS firmware_releases (
   uploaded_by TEXT NOT NULL,
   uploaded_at INTEGER NOT NULL
 );
+
+-- The user's own last deliberate Charge Switch command, per device -
+-- written by PATCH /:hubId/settings (see routes/hubs.js) whenever the
+-- "charge" key is saved. server/chargeWatchdog.js reads this to tell "the
+-- user themselves turned it off" (respect it, never touch) apart from
+-- "it's off with no known user command behind it" (a firmware reboot
+-- echoing its real MOSFET state into the same settings/charge field,
+-- confirmed as a real failure mode earlier - see BMSDashboard.jsx's
+-- write-guard comments) - only the latter gets auto-corrected back on.
+CREATE TABLE IF NOT EXISTS charge_switch_intent (
+  hub_id         TEXT NOT NULL,
+  bms_key        TEXT NOT NULL DEFAULT '',
+  desired_charge INTEGER NOT NULL,
+  updated_at     INTEGER NOT NULL,
+  PRIMARY KEY (hub_id, bms_key)
+);

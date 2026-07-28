@@ -14,10 +14,12 @@ import { createAnnouncementsRouter } from "./routes/announcements.js";
 import { createFirmwareRouter } from "./routes/firmware.js";
 import { attachRealtime } from "./realtime.js";
 import { startTelemetryLogger } from "./telemetryLogger.js";
+import { startChargeWatchdog } from "./chargeWatchdog.js";
 import { isAllowedOrigin } from "./corsOrigin.js";
 
 migrate();
 startTelemetryLogger();
+startChargeWatchdog();
 
 const app = express();
 // Scoped to /api only - the built frontend is served same-origin from this
