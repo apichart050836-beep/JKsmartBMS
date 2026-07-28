@@ -4,6 +4,10 @@ import { ArrowUpRight, ArrowDownRight, Cable, RefreshCw, WifiOff, Clock, Message
 import { clamp, statusTone, voltDiffToneWithThreshold } from "./lib/tone.js";
 import { useBmsPackLive } from "./hooks/useBmsPackLive.js";
 import { useHubDevices } from "./hooks/useHubDevices.js";
+import { useHubData } from "./context/HubDataContext.jsx";
+import { useWeatherLocation } from "./hooks/useWeatherLocation.js";
+import { InstallationLocationModal } from "./components/InstallationLocationModal.jsx";
+import { WeatherModal } from "./components/WeatherModal.jsx";
 import { DetailedLog } from "./components/DetailedLog.jsx";
 import { SystemHero } from "./components/SystemHero.jsx";
 import { SensorRow } from "./components/SensorRow.jsx";
@@ -299,9 +303,11 @@ function Pill({ tone = "brand", icon: Icon, children }) {
 // Main dashboard
 // ---------------------------------------------------------------------------
 
-export default function BMSDashboard({ onSoftwareVersionChange, onOpenWeather }) {
+export default function BMSDashboard({ onSoftwareVersionChange }) {
   const { logout } = useAuth();
+  const { hubs } = useHubData();
   const [now, setNow] = useState(new Date());
+  const [showWeatherModal, setShowWeatherModal] = useState(false);
   // Persisted across refreshes - slot ids are stable/positional (see
   // buildBmsSlots), so restoring whichever one the user had open last is
   // safe even though the underlying device list is only known after
@@ -332,6 +338,15 @@ export default function BMSDashboard({ onSoftwareVersionChange, onOpenWeather })
   // uniform structure built around this.
   const { devices, loaded: hubLoaded } = useHubDevices();
   const slots = buildBmsSlots(devices);
+
+  // Weather is about the physical BMS/solar installation, not any one BMS
+  // pack - one location per hub (account), shared by every device/tab that
+  // opens this dashboard. Every slot's hubId is identical for a 'user' role
+  // session (they only ever have the one hub), so the first slot with a
+  // real device is enough to identify it.
+  const weatherHubId = devices[0]?.hubId ?? null;
+  const savedLocation = weatherHubId ? hubs[weatherHubId]?.location ?? null : null;
+  const weatherLoc = useWeatherLocation(weatherHubId, savedLocation);
 
   // Each pack keeps its own configuration, edited via the Configuration
   // modal. Every slot uses the same uniform defaults (see buildBmsSlots),
@@ -378,11 +393,18 @@ export default function BMSDashboard({ onSoftwareVersionChange, onOpenWeather })
   const active = packs.find((p) => p.id === activeBmsId) ?? packs[0];
   const activeConfig = slots.find((b) => b.id === activeBmsId) ?? slots[0];
 
-  // Reports the active device's version up to App.jsx, which renders the
-  // badge next to the "Dashboard" nav pill (outside this component).
+  // Reports the active device's versions up to App.jsx, which renders the
+  // Update badge/button next to the "Dashboard" nav pill (outside this
+  // component) and its "check for update" popup - hardware_version is the
+  // real field for "BMS Version" (e.g. "15H"), confirmed live alongside
+  // software_version on the same info node.
   useEffect(() => {
-    onSoftwareVersionChange?.(active.info?.software_version ?? null);
-  }, [active.info?.software_version, onSoftwareVersionChange]);
+    onSoftwareVersionChange?.({
+      software: active.info?.software_version ?? null,
+      hardware: active.info?.hardware_version ?? null,
+      deviceLabel: active.name,
+    });
+  }, [active.info?.software_version, active.info?.hardware_version, active.name, onSoftwareVersionChange]);
 
   // ESP32 firmware version - real field (info.software_version), same
   // object already used for battery_type elsewhere. There's no dedicated
@@ -733,7 +755,10 @@ export default function BMSDashboard({ onSoftwareVersionChange, onOpenWeather })
           tabs={slots.filter((s) => s.live).map((s) => ({ id: s.id, name: s.name, mac: s.deviceKey }))}
           activeBmsId={activeBmsId}
           onSelectBms={setActiveBmsId}
-          onOpenWeather={onOpenWeather}
+          onOpenWeather={() => {
+            setShowWeatherModal(true);
+            weatherLoc.openWeather();
+          }}
           onOpenConfig={() => setShowConfig(true)}
           configDisabled={active.isLive && active.adminDisabled}
           onLogout={() => setIsLogoutModalOpen(true)}
@@ -937,8 +962,29 @@ export default function BMSDashboard({ onSoftwareVersionChange, onOpenWeather })
             setShowConfig(false);
             setShowLog(true);
           }}
+          onChangeLocation={() => {
+            setShowConfig(false);
+            weatherLoc.setShowSetupModal(true);
+          }}
         />
       </Modal>
+
+      <InstallationLocationModal
+        open={weatherLoc.showSetupModal}
+        initialLocation={savedLocation}
+        onSave={weatherLoc.saveLocation}
+        onClose={() => weatherLoc.setShowSetupModal(false)}
+        saving={weatherLoc.saving}
+      />
+      <WeatherModal
+        open={showWeatherModal}
+        onClose={() => setShowWeatherModal(false)}
+        weather={weatherLoc.weather}
+        loading={weatherLoc.loading}
+        error={weatherLoc.error}
+        location={savedLocation}
+        onRetry={() => weatherLoc.loadWeather()}
+      />
 
       <Modal open={showOfflineModal} onClose={() => setOfflineDismissed(true)} title="อุปกรณ์หลุดการเชื่อมต่อ">
         <div className="flex flex-col items-center gap-1 py-2 text-center">

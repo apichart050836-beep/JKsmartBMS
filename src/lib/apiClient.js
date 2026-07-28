@@ -34,6 +34,11 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ bmsKey, key, value }),
     }),
+  saveHubLocation: (hubId, { name, lat, lng }) =>
+    request(`/api/hubs/${encodeURIComponent(hubId)}/location`, {
+      method: "PATCH",
+      body: JSON.stringify({ name, lat, lng }),
+    }),
   saveDeviceName: (hubId, bmsKey, name) =>
     request(`/api/hubs/${encodeURIComponent(hubId)}/device-name`, {
       method: "PATCH",

@@ -70,6 +70,34 @@ router.patch("/:hubId/settings", requireAuth, requireFirebase, async (req, res) 
   }
 });
 
+// BMS/solar installation's fixed physical location - one per hub (account),
+// NOT per BMS device and NOT the viewer's own device GPS. Written once from
+// the Installation Location setup modal (or Settings > Change Installation
+// Location), then read back as part of the normal hub tree every session/
+// device that opens this dashboard - see useWeatherLocation.js. Stored at
+// the hub root (sibling of each BMS device key, not nested under one),
+// since bmsShape.js's isBmsShaped() only matches {status,settings} or
+// {status:string}/{expire_date} shapes, this key is safely ignored by every
+// device-discovery walk (flattenHubs/useHubDevices/useAdminHubs) instead of
+// being mistaken for an extra BMS tab.
+router.patch("/:hubId/location", requireAuth, requireFirebase, async (req, res) => {
+  const { hubId } = req.params;
+  const { name, lat, lng } = req.body ?? {};
+  if (!isSafeKey(hubId) || !canAccessHub(req.user, hubId)) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  if (typeof name !== "string" || !name.trim() || typeof lat !== "number" || typeof lng !== "number") {
+    return res.status(400).json({ error: "Invalid request" });
+  }
+  try {
+    await writePath(`JK_BMS_HUB/${hubId}/location`, { name: name.trim(), lat, lng, updatedAt: Date.now() });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(`PATCH /api/hubs/${hubId}/location failed: ${err.message}`);
+    res.status(503).json({ error: "Could not save location" });
+  }
+});
+
 router.patch("/:hubId/device-name", requireAuth, requireFirebase, async (req, res) => {
   const { hubId } = req.params;
   const { bmsKey, name } = req.body ?? {};

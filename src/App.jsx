@@ -9,10 +9,8 @@ import { ThemeProvider } from "./context/ThemeContext.jsx";
 import { AuthProvider, useAuth } from "./context/AuthContext.jsx";
 import { HubDataProvider } from "./context/HubDataContext.jsx";
 import { LogoutModal } from "./components/LogoutModal.jsx";
-import { WeatherModal } from "./components/WeatherModal.jsx";
-import { LocationPermissionModal } from "./components/LocationPermissionModal.jsx";
-import { LocationMovedToast } from "./components/LocationMovedToast.jsx";
-import { useWeatherLocation } from "./hooks/useWeatherLocation.js";
+import { VersionCheckModal } from "./components/VersionCheckModal.jsx";
+import { FirmwareUpdateToast } from "./components/FirmwareUpdateToast.jsx";
 
 const PAGES = [
   // Dashboard (live per-device telemetry + Configuration) is user-role only -
@@ -33,15 +31,18 @@ function AuthedApp() {
   const defaultPage = user.role === "admin" ? "admin" : "dashboard";
   const [page, setPage] = useState(defaultPage);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
-  // ESP32 firmware version of whichever device BMSDashboard currently has
-  // active - lifted up via a callback since the pill it's shown next to
-  // lives here, outside BMSDashboard itself.
-  const [activeSoftwareVersion, setActiveSoftwareVersion] = useState(null);
+  // Versions of whichever device BMSDashboard currently has active - lifted
+  // up via a callback since the badge/button it's shown next to lives here,
+  // outside BMSDashboard itself.
+  const [deviceVersions, setDeviceVersions] = useState({ software: null, hardware: null, deviceLabel: null });
+  const [showVersionModal, setShowVersionModal] = useState(false);
+  // Reuses FirmwareUpdateToast (already built for the auto-detected
+  // version-change case inside BMSDashboard) for a manual "Update" press in
+  // the version popup - same component/animation, a separate toast instance
+  // since that one's state is local to BMSDashboard.
+  const [manualUpdateToast, setManualUpdateToast] = useState(null);
   const pages = PAGES.filter((p) => (p.adminOnly ? user.role === "admin" : !p.userOnly || user.role !== "admin"));
   const activePage = pages.find((p) => p.id === page) ? page : defaultPage;
-
-  const [showWeatherModal, setShowWeatherModal] = useState(false);
-  const weatherLoc = useWeatherLocation();
 
   return (
     <HubDataProvider>
@@ -66,13 +67,16 @@ function AuthedApp() {
               </button>
             );
           })}
-          {activePage === "dashboard" && activeSoftwareVersion && (
-            <span
-              title="ESP32 firmware version"
-              className="inline-flex items-center gap-1 rounded-lg bg-[var(--muted)] px-2 py-1 text-[10px] font-semibold text-[var(--muted-foreground)]"
+          {activePage === "dashboard" && deviceVersions.software && (
+            <button
+              type="button"
+              onClick={() => setShowVersionModal(true)}
+              title="ตรวจสอบอัพเดทเฟิร์มแวร์"
+              className="inline-flex items-center gap-1 rounded-lg bg-[var(--muted)] px-2 py-1 text-[10px] font-semibold text-[var(--muted-foreground)] transition-colors hover:bg-[var(--border)] hover:text-[var(--foreground)]"
             >
-              <Cpu className="size-3" />v{activeSoftwareVersion}
-            </span>
+              <Cpu className="size-3" />
+              Update
+            </button>
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -94,13 +98,7 @@ function AuthedApp() {
         </div>
       </div>
       {activePage === "dashboard" ? (
-        <BMSDashboard
-          onSoftwareVersionChange={setActiveSoftwareVersion}
-          onOpenWeather={async () => {
-            setShowWeatherModal(true);
-            await weatherLoc.openWeather();
-          }}
-        />
+        <BMSDashboard onSoftwareVersionChange={setDeviceVersions} />
       ) : (
         <AdminMonitor />
       )}
@@ -112,27 +110,19 @@ function AuthedApp() {
           logout();
         }}
       />
-
-      <LocationPermissionModal
-        open={weatherLoc.showPermissionPrompt}
-        loading={weatherLoc.loading}
-        onAllow={() => weatherLoc.detectLocation().catch(() => {})}
-        onDismiss={weatherLoc.dismissPermissionPrompt}
+      <VersionCheckModal
+        open={showVersionModal}
+        onClose={() => setShowVersionModal(false)}
+        deviceLabel={deviceVersions.deviceLabel}
+        softwareVersion={deviceVersions.software}
+        hardwareVersion={deviceVersions.hardware}
+        onUpdate={() => {
+          setShowVersionModal(false);
+          setManualUpdateToast({ deviceLabel: deviceVersions.deviceLabel, version: deviceVersions.software });
+          setTimeout(() => setManualUpdateToast(null), 6000);
+        }}
       />
-      <LocationMovedToast
-        open={weatherLoc.movedNotice}
-        onUpdate={weatherLoc.updateLocationNow}
-        onDismiss={weatherLoc.dismissMovedNotice}
-      />
-      <WeatherModal
-        open={showWeatherModal}
-        onClose={() => setShowWeatherModal(false)}
-        weather={weatherLoc.weather}
-        loading={weatherLoc.loading}
-        error={weatherLoc.error}
-        location={weatherLoc.location}
-        onRetry={() => weatherLoc.openWeather()}
-      />
+      <FirmwareUpdateToast update={manualUpdateToast} />
     </HubDataProvider>
   );
 }

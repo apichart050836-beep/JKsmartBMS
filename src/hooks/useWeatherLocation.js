@@ -1,128 +1,79 @@
-import { useState, useCallback, useEffect } from "react";
-import * as geo from "../lib/geolocation.js";
+import { useState } from "react";
 import { fetchWeather } from "../lib/weatherService.js";
+import { api } from "../lib/apiClient.js";
 
 const ERROR_MESSAGES = {
-  PERMISSION_DENIED: "กรุณาเปิด Location เพื่อใช้งานฟังก์ชันนี้",
-  POSITION_UNAVAILABLE: "ไม่สามารถระบุตำแหน่งได้",
-  UNSUPPORTED: "เบราว์เซอร์นี้ไม่รองรับการระบุตำแหน่ง",
   NO_API_KEY: "ยังไม่ได้ตั้งค่า Weather API key",
   API_ERROR: "โหลดข้อมูลสภาพอากาศไม่สำเร็จ",
 };
 
 /**
- * Combines geolocation.js (permission/position/storage) and
- * weatherService.js (the actual API call) into the state a weather button +
- * modal need: first-visit permission prompt, silent auto-detect once
- * already granted, "you've moved" notice, loading/error states.
+ * Weather for the BMS/solar installation's fixed location - saved once per
+ * hub (account) to Firebase at JK_BMS_HUB/{hubId}/location, not the
+ * viewer's own device GPS. `savedLocation` is sourced by the caller from
+ * the normal hub tree (HubDataContext/useHubData), the same live data
+ * every other Configuration value already flows through - a different
+ * device opening the same dashboard sees the same installation weather,
+ * never wherever THAT device happens to be.
+ *
+ * @param {string|null} hubId
+ * @param {{name:string, lat:number, lng:number}|null} savedLocation
  */
-export function useWeatherLocation() {
-  const [showPermissionPrompt, setShowPermissionPrompt] = useState(false);
-  const [location, setLocation] = useState(() => geo.getStoredLocation());
+export function useWeatherLocation(hubId, savedLocation) {
+  const [showSetupModal, setShowSetupModal] = useState(false);
   const [weather, setWeather] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [movedNotice, setMovedNotice] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  const detectLocation = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const pos = await geo.getCurrentPosition();
-      const previous = geo.getStoredLocation();
-      if (geo.hasMovedSignificantly(previous, pos)) {
-        setMovedNotice(true);
-      }
-      const stored = geo.storeLocation(pos);
-      setLocation(stored);
-      geo.markAsked();
-      setShowPermissionPrompt(false);
-      return stored;
-    } catch (err) {
-      setError(ERROR_MESSAGES[err.message] ?? ERROR_MESSAGES.POSITION_UNAVAILABLE);
-      throw err;
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const loadWeather = useCallback(async (targetLocation) => {
-    const loc = targetLocation ?? geo.getStoredLocation();
+  async function loadWeather(loc = savedLocation) {
     if (!loc) return;
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchWeather(loc.latitude, loc.longitude);
+      const data = await fetchWeather(loc.lat, loc.lng);
       setWeather(data);
     } catch (err) {
       setError(ERROR_MESSAGES[err.message] ?? ERROR_MESSAGES.API_ERROR);
     } finally {
       setLoading(false);
     }
-  }, []);
-
-  // On mount: already granted -> detect silently, no prompt. Never asked
-  // before -> show the permission prompt once. Previously denied/dismissed
-  // -> do nothing until the user opens the weather button themselves.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const state = await geo.getPermissionState();
-      if (cancelled) return;
-      if (state === "granted") {
-        detectLocation().catch(() => {});
-      } else if (state === "prompt" && !geo.hasAskedBefore()) {
-        setShowPermissionPrompt(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  function dismissPermissionPrompt() {
-    geo.markAsked();
-    setShowPermissionPrompt(false);
   }
 
-  function dismissMovedNotice() {
-    setMovedNotice(false);
-  }
-
-  async function openWeather() {
-    let loc = location;
-    if (!loc) {
-      try {
-        loc = await detectLocation();
-      } catch {
-        return;
-      }
+  // First-ever open with no saved location yet -> setup modal instead of
+  // silently falling back to device GPS. Already set up -> just fetch.
+  function openWeather() {
+    if (!savedLocation) {
+      setShowSetupModal(true);
+      return;
     }
-    loadWeather(loc);
+    loadWeather();
   }
 
-  async function updateLocationNow() {
-    setMovedNotice(false);
+  async function saveLocation({ name, lat, lng }) {
+    if (!hubId) return false;
+    setSaving(true);
     try {
-      const loc = await detectLocation();
-      loadWeather(loc);
+      await api.saveHubLocation(hubId, { name, lat, lng });
+      setShowSetupModal(false);
+      await loadWeather({ name, lat, lng });
+      return true;
     } catch {
-      // error state already set by detectLocation
+      return false;
+    } finally {
+      setSaving(false);
     }
   }
 
   return {
-    showPermissionPrompt,
-    detectLocation,
-    dismissPermissionPrompt,
-    location,
+    showSetupModal,
+    setShowSetupModal,
     weather,
     loading,
     error,
+    saving,
     openWeather,
-    movedNotice,
-    dismissMovedNotice,
-    updateLocationNow,
+    loadWeather,
+    saveLocation,
   };
 }
