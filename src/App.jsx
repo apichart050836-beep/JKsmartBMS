@@ -43,13 +43,13 @@ function UpdateBadge({ deviceVersions }) {
         title="ตรวจสอบอัพเดทเฟิร์มแวร์"
         className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-semibold transition-colors ${
           firmwareIsNew
-            ? "bg-[var(--brand)] text-white hover:opacity-90"
-            : "bg-[var(--muted)] text-[var(--muted-foreground)] hover:bg-[var(--border)] hover:text-[var(--foreground)]"
+            ? "bg-[var(--brand)] text-white shadow-sm hover:opacity-90"
+            : "bg-[var(--brand-10)] text-[var(--brand)] hover:opacity-80"
         }`}
       >
         <Cpu className="size-3" />
         Update
-        {firmwareIsNew && <span className="ml-0.5 size-1.5 rounded-full bg-white" />}
+        {firmwareIsNew && <span className="ml-0.5 size-1.5 animate-pulse rounded-full bg-white" />}
       </button>
 
       <VersionCheckModal
