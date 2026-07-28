@@ -45,34 +45,36 @@ export function useBmsPackLive(config) {
   const adminDisabled = !adminEnabled;
   const connected = !!raw && adminEnabled;
 
-  // lastUpdateAt (used for the Online/Offline check) advances on
-  // info.uptime_seconds actually increasing, per explicit instruction - a
-  // live device's own seconds-since-boot counter only ever climbs, so it's
-  // a direct, unambiguous "this is a fresh reading" signal rather than an
-  // indirect one. Confirmed live (2026-07-27, BLE physically unplugged)
+  // lastUpdateAt (used for the Online/Offline check) advances whenever
+  // EITHER info.uptime_seconds has increased OR any field in status has
+  // changed, per explicit instruction - checked independently, not one as
+  // a fallback for the other, so a device proves itself live via whichever
+  // signal actually moves. A live device's own seconds-since-boot counter
+  // only ever climbs, so that alone is already a direct, unambiguous "this
+  // is a fresh reading" signal; the whole-status diff catches everything
+  // else (current, voltages, temps, ...) in case a specific device's
+  // uptime_seconds reporting is ever flaky while the rest of its telemetry
+  // keeps moving. Confirmed live (2026-07-27, BLE physically unplugged)
   // that jkbms-bridge.yaml stops writing to Firebase entirely when the BLE
-  // link drops rather than re-pushing a heartbeat, so uptime_seconds really
-  // does freeze the moment the link dies, and our own 5s backend poll would
+  // link drops rather than re-pushing a heartbeat, so both signals really
+  // do freeze the moment the link dies, and our own 5s backend poll would
   // otherwise keep re-delivering that frozen snapshot and masking the
-  // disconnect forever. Falls back to the previous whole-status-JSON diff
-  // for a device that isn't reporting uptime_seconds at all (older bridge
-  // firmware), so such a device doesn't end up permanently "offline"
-  // instead. Log/power-history entries share this same freshness gate (a
-  // duplicate row for an unchanged reading isn't useful either).
+  // disconnect forever. Log/power-history entries share this same
+  // freshness gate (a duplicate row for an unchanged reading isn't useful
+  // either).
   const lastUptimeRef = useRef(null);
   useEffect(() => {
     if (!connected) return;
     const uptime = info.uptime_seconds;
-    let isFresh;
-    if (typeof uptime === "number") {
-      const prevUptime = lastUptimeRef.current;
-      isFresh = prevUptime == null || uptime > prevUptime;
-      lastUptimeRef.current = uptime;
-    } else {
-      const statusJson = JSON.stringify(status);
-      isFresh = lastStatusJsonRef.current !== statusJson;
-      lastStatusJsonRef.current = statusJson;
-    }
+    const prevUptime = lastUptimeRef.current;
+    const uptimeIncreased = typeof uptime === "number" && (prevUptime == null || uptime > prevUptime);
+    if (typeof uptime === "number") lastUptimeRef.current = uptime;
+
+    const statusJson = JSON.stringify(status);
+    const statusChanged = lastStatusJsonRef.current !== statusJson;
+    lastStatusJsonRef.current = statusJson;
+
+    const isFresh = uptimeIncreased || statusChanged;
     if (!isFresh) return;
 
     setLastUpdateAt(Date.now());

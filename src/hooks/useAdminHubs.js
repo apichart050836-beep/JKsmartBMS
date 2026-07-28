@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useHubData } from "../context/HubDataContext.jsx";
 import { flattenHubs } from "../lib/flattenHubs.js";
 
-const STALE_AFTER_MS = 15000; // matches BMSDashboard's per-device Online/Offline threshold
+const STALE_AFTER_MS = 20000; // matches BMSDashboard's per-device Online/Offline threshold
 
 /**
  * Fleet-wide view of every hub (and every BMS nested under it) visible to
@@ -23,32 +23,27 @@ export function useAdminHubs() {
     return () => clearInterval(id);
   }, []);
 
-  // "Fresh" is keyed off info.uptime_seconds actually increasing (same
-  // basis as useBmsPackLive.js's per-device Online/Offline check) - a live
-  // device's own seconds-since-boot counter only ever climbs, so it's a
-  // direct signal rather than an indirect one. Falls back to the previous
-  // whole-status-JSON diff for a device that isn't reporting
-  // uptime_seconds at all.
+  // "Fresh" whenever EITHER info.uptime_seconds has increased OR any field
+  // in status has changed (same basis as useBmsPackLive.js's per-device
+  // Online/Offline check) - checked independently, not one as a fallback
+  // for the other.
   useEffect(() => {
     const nowMs = Date.now();
     for (const { hubId, bmsKey, data } of flattenHubs(hubs)) {
       const trackKey = `${hubId}/${bmsKey ?? "_"}`;
       const prev = lastSeenRef.current[trackKey];
       const uptime = data?.info?.uptime_seconds;
+      const statusJson = JSON.stringify(data?.status ?? {});
 
-      let isFresh;
-      if (typeof uptime === "number") {
-        isFresh = !prev || prev.uptime == null || uptime > prev.uptime;
-      } else {
-        const statusJson = JSON.stringify(data?.status ?? {});
-        isFresh = !prev || prev.statusJson !== statusJson;
-      }
+      const uptimeIncreased = typeof uptime === "number" && (!prev || prev.uptime == null || uptime > prev.uptime);
+      const statusChanged = !prev || prev.statusJson !== statusJson;
+      const isFresh = uptimeIncreased || statusChanged;
 
       if (isFresh) {
         lastSeenRef.current[trackKey] = {
           t: nowMs,
           uptime: typeof uptime === "number" ? uptime : prev?.uptime,
-          statusJson: JSON.stringify(data?.status ?? {}),
+          statusJson,
         };
       }
     }
