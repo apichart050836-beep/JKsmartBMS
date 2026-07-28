@@ -23,14 +23,33 @@ export function useAdminHubs() {
     return () => clearInterval(id);
   }, []);
 
+  // "Fresh" is keyed off info.uptime_seconds actually increasing (same
+  // basis as useBmsPackLive.js's per-device Online/Offline check) - a live
+  // device's own seconds-since-boot counter only ever climbs, so it's a
+  // direct signal rather than an indirect one. Falls back to the previous
+  // whole-status-JSON diff for a device that isn't reporting
+  // uptime_seconds at all.
   useEffect(() => {
     const nowMs = Date.now();
     for (const { hubId, bmsKey, data } of flattenHubs(hubs)) {
       const trackKey = `${hubId}/${bmsKey ?? "_"}`;
-      const statusJson = JSON.stringify(data?.status ?? {});
       const prev = lastSeenRef.current[trackKey];
-      if (!prev || prev.statusJson !== statusJson) {
-        lastSeenRef.current[trackKey] = { t: nowMs, statusJson };
+      const uptime = data?.info?.uptime_seconds;
+
+      let isFresh;
+      if (typeof uptime === "number") {
+        isFresh = !prev || prev.uptime == null || uptime > prev.uptime;
+      } else {
+        const statusJson = JSON.stringify(data?.status ?? {});
+        isFresh = !prev || prev.statusJson !== statusJson;
+      }
+
+      if (isFresh) {
+        lastSeenRef.current[trackKey] = {
+          t: nowMs,
+          uptime: typeof uptime === "number" ? uptime : prev?.uptime,
+          statusJson: JSON.stringify(data?.status ?? {}),
+        };
       }
     }
   }, [hubs]);
