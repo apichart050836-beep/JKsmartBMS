@@ -706,9 +706,19 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
   //   as the data can move: the backend polls Firebase every 5s
   //   (realtime.js's REST_POLL_MS), matching jkbms-bridge.yaml's own ~5s
   //   push cadence, so there's nothing more real-time to extract there.
-  //   30s just gives the offline call itself more room (6 missed poll
-  //   cycles) before declaring a dead BLE link, per request.
-  const STALE_AFTER_MS = 30000;
+  //   90s: confirmed live (2026-07-28) that info.uptime_seconds only
+  //   actually changes in ~60s jumps (an ESPHome sensor on its own
+  //   60s update_interval, independent of the 5s Firebase push cadence),
+  //   and status can legitimately stay byte-identical for 40+s on a
+  //   genuinely connected but numerically-stable device (idle SOC, steady
+  //   current). A shorter threshold was flipping Online devices to Offline
+  //   just because neither signal happened to move within the window, not
+  //   because the device was actually gone - 90s comfortably clears that
+  //   ~60s quantization with margin for poll jitter. A tighter threshold
+  //   than this isn't achievable from content-diffing alone without the
+  //   ESP32 itself writing a real per-push heartbeat field, which is out
+  //   of scope (ESP32 firmware/protocol changes weren't requested).
+  const STALE_AFTER_MS = 90000;
   const isOnline = active.isLive
     ? !!active.firebaseConnected &&
       !!active.lastUpdateAt &&
