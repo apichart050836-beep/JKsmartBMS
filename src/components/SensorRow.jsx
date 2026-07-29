@@ -9,9 +9,11 @@ import { statusTone } from "../lib/tone.js";
  * tiles (same shell as the kit's DeviceCard) rather than glass, per spec
  * ("UI ขอบมนแบบคลีน").
  *
- * `channels` is per-pack (useBmsPackLive always reports 3 - T1/T2/CMOS, the
- * real JK-BD4A8S6P board's own channel set), passed in rather than a fixed
- * import, and the tile just renders whatever list it's given.
+ * `channels` is per-pack (useBmsPackLive reports T1/T2/T4/T5/CMOS - 5 real
+ * sensor fields, T3 deliberately excluded per spec), passed in rather than a
+ * fixed import, and the tile just renders whatever list it's given - the "N-
+ * Channel" label below reads channels.length directly, so it grows on its
+ * own if another channel is ever added there.
  */
 
 // A sensor alarms as soon as it crosses the configured OTP; it flags amber a

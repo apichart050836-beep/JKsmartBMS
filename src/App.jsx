@@ -14,6 +14,22 @@ import { FirmwareUpdateToast } from "./components/FirmwareUpdateToast.jsx";
 import { FirmwareReleaseModal } from "./components/FirmwareReleaseModal.jsx";
 import { api } from "./lib/apiClient.js";
 
+// Per-device "already acted on this exact version" memory for the auto-popup
+// below - keyed by device + version (not just device), so publishing a NEWER
+// update after this one is acknowledged pops up again on its own, exactly
+// like the older global dismissedFirmwareId in HubDataContext.jsx, just
+// device-scoped instead of release-id-scoped since the real signal is a
+// per-device Firebase node, not a single global row.
+function deviceAckKey(hubId, bmsKey) {
+  return `bms-firmware-acked-device-${hubId}-${bmsKey ?? "_"}`;
+}
+function getAckedDeviceVersion(hubId, bmsKey) {
+  return localStorage.getItem(deviceAckKey(hubId, bmsKey));
+}
+function setAckedDeviceVersion(hubId, bmsKey, version) {
+  localStorage.setItem(deviceAckKey(hubId, bmsKey), version);
+}
+
 // Badge next to the Dashboard pill + its two popups (manual check, and the
 // auto "new firmware" notice). A separate component (not inline in
 // AuthedApp) because it needs useHubData() for the firmware-release state,
@@ -25,8 +41,12 @@ function UpdateBadge({ deviceVersions }) {
   const { firmwareRelease, firmwareIsNew, acknowledgeFirmwareRelease } = useHubData();
   const [showVersionModal, setShowVersionModal] = useState(false);
   const [manualUpdateToast, setManualUpdateToast] = useState(null);
-  // "เตือนภายหลัง"/close only hides the auto-popup for this session (not
-  // acknowledged) - it reappears on the next load, per its own label.
+  // "เตือนภายหลัง"/close only hides the auto-popup for THIS session on THIS
+  // device - reset below whenever the active device changes, and it's never
+  // set at all by a real per-device update (that path only stops the popup
+  // via setAckedDeviceVersion, which is permanent-until-a-newer-version, not
+  // session-only) - see requirement: pop up every time until Update is
+  // actually pressed, not just until closed once.
   const [autoPopupDismissedThisSession, setAutoPopupDismissedThisSession] = useState(false);
   // Real per-device OTA trigger state (server/routes/hubs.js's
   // trigger-update route) - separate from the acknowledge-only toast, which
@@ -35,6 +55,12 @@ function UpdateBadge({ deviceVersions }) {
   const [updateError, setUpdateError] = useState(null);
   const [updateSent, setUpdateSent] = useState(false);
 
+  // A new active device (tab switch) starts with a clean slate - closing the
+  // popup for BMS 1 shouldn't silence it for BMS 2's own, unrelated update.
+  useEffect(() => {
+    setAutoPopupDismissedThisSession(false);
+  }, [deviceVersions.hubId, deviceVersions.bmsKey]);
+
   function showUpdateToast(status) {
     setManualUpdateToast({ deviceLabel: deviceVersions.deviceLabel, version: deviceVersions.software, status });
     setTimeout(() => setManualUpdateToast(null), 6000);
@@ -42,6 +68,8 @@ function UpdateBadge({ deviceVersions }) {
 
   const deviceFirmware = deviceVersions.firmware;
   const realIsNew = !!deviceFirmware?.latest_version && deviceFirmware.latest_version !== deviceVersions.software;
+  const ackedVersion = deviceVersions.hubId ? getAckedDeviceVersion(deviceVersions.hubId, deviceVersions.bmsKey) : null;
+  const realPending = realIsNew && deviceFirmware?.latest_version !== ackedVersion;
   const badgeIsNew = firmwareIsNew || realIsNew;
 
   async function handleRealUpdate() {
@@ -57,6 +85,9 @@ function UpdateBadge({ deviceVersions }) {
     try {
       await api.triggerFirmwareUpdate(deviceVersions.hubId, deviceVersions.bmsKey);
       setUpdateSent(true);
+      if (deviceFirmware?.latest_version) {
+        setAckedDeviceVersion(deviceVersions.hubId, deviceVersions.bmsKey, deviceFirmware.latest_version);
+      }
       showUpdateToast("sent");
     } catch (err) {
       setUpdateError(err.message || "ส่งคำสั่งไม่สำเร็จ");
@@ -67,6 +98,22 @@ function UpdateBadge({ deviceVersions }) {
   }
 
   if (!deviceVersions.software) return null;
+
+  // Prefer the real per-device signal for the auto-popup (it's what admin
+  // actually aimed at THIS device); only fall back to the older global
+  // SQLite-backed release when this device was never specifically targeted,
+  // so there's still something to announce instead of nothing.
+  const popupRelease = realPending
+    ? {
+        isReal: true,
+        version: deviceFirmware.latest_version,
+        uploadedAt: deviceFirmware.uploaded_at,
+        releaseNotes: deviceFirmware.release_notes,
+        deviceLabel: deviceVersions.deviceLabel,
+      }
+    : firmwareIsNew && firmwareRelease
+    ? { isReal: false, version: firmwareRelease.version, filename: firmwareRelease.filename, uploadedAt: firmwareRelease.uploadedAt }
+    : null;
 
   return (
     <>
@@ -103,11 +150,15 @@ function UpdateBadge({ deviceVersions }) {
         onUpdate={handleRealUpdate}
       />
       <FirmwareReleaseModal
-        open={firmwareIsNew && !autoPopupDismissedThisSession}
-        release={firmwareRelease}
+        open={!!popupRelease && !autoPopupDismissedThisSession}
+        release={popupRelease}
         onUpdate={() => {
-          acknowledgeFirmwareRelease();
-          showUpdateToast();
+          if (popupRelease?.isReal) {
+            handleRealUpdate();
+          } else {
+            acknowledgeFirmwareRelease();
+            showUpdateToast();
+          }
         }}
         onRemindLater={() => setAutoPopupDismissedThisSession(true)}
       />

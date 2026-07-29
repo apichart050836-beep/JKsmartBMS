@@ -87,7 +87,9 @@ export function useBmsPackLive(config) {
     // current is the only trustworthy source for which way power is
     // actually flowing right now.
     const statusLabel = current > 0 ? "Charging" : current < 0 ? "Discharging" : "Standby";
-    const tempVals = [status.battery_t1, status.battery_t2, status.mos_temp].filter((v) => typeof v === "number");
+    const tempVals = [status.battery_t1, status.battery_t2, status.battery_t4, status.battery_t5, status.mos_temp].filter(
+      (v) => typeof v === "number"
+    );
     const avgTemp = tempVals.length ? tempVals.reduce((a, b) => a + b, 0) / tempVals.length : 0;
     const now = new Date();
 
@@ -170,10 +172,17 @@ export function useBmsPackLive(config) {
   const dailyDischargeAh = status.dailyDischargeAh ?? 0;
   const dailyDischargeKwh = status.dailyDischargeKwh ?? 0;
 
+  // 5-channel set per explicit spec - t1, t2, t4, t5 (t3 deliberately
+  // excluded), plus CMOS/MOSFET temp. SensorRow's "N-Channel" label reads
+  // channels.length directly, so this list is the single place that count
+  // comes from - adding another real sensor field here is enough to grow
+  // the label and tile automatically.
   const tempChannels = useMemo(
     () => [
       { key: "t1", label: "T1" },
       { key: "t2", label: "T2" },
+      { key: "t4", label: "T4" },
+      { key: "t5", label: "T5" },
       { key: "cmosTemp", label: "CMOS" },
     ],
     []
@@ -182,9 +191,11 @@ export function useBmsPackLive(config) {
     () => ({
       t1: status.battery_t1 ?? 0,
       t2: status.battery_t2 ?? 0,
+      t4: status.battery_t4 ?? 0,
+      t5: status.battery_t5 ?? 0,
       cmosTemp: status.mos_temp ?? 0,
     }),
-    [status.battery_t1, status.battery_t2, status.mos_temp]
+    [status.battery_t1, status.battery_t2, status.battery_t4, status.battery_t5, status.mos_temp]
   );
   const tempValues = useMemo(() => Object.values(temps), [temps]);
   const avgTemp = useMemo(

@@ -2,14 +2,21 @@ import React from "react";
 import { Sparkles } from "lucide-react";
 
 /**
- * Auto-pops up once per new admin-published firmware release (see
- * HubDataContext's firmwareIsNew - driven by server/routes/firmware.js's
- * "firmware:release" broadcast). "อัพเดทตอนนี้" acknowledges permanently
- * (won't show again for this release); "เตือนภายหลัง" only hides it for
- * this session - the badge next to Dashboard stays colored either way, and
- * this popup will reappear on the next load until acknowledged. Purely a
- * publish+notify workflow - see FirmwareUpdateToast for what "Update"
- * actually does (nothing reaches a physical ESP32 from here).
+ * Auto-pops up when there's a firmware update this device hasn't acted on
+ * yet. `release` is a normalized shape App.jsx builds from whichever source
+ * is actually meaningful for the active device:
+ *   - `release.isReal: true` - this device's own Firebase firmware node
+ *     (admin explicitly targeted it). "อัพเดทตอนนี้" here is a REAL action:
+ *     it PATCHes update_flag=true for this exact device (server/routes/
+ *     hubs.js), which the ESP32's own ota_updater component polls and acts
+ *     on. Reappears on every load/device-switch until that PATCH actually
+ *     succeeds for this specific version - closing ("เตือนภายหลัง") only
+ *     silences it for the current session, not permanently.
+ *   - `release.isReal: false` - the older global SQLite-backed release
+ *     (server/routes/firmware.js's firmware_releases table, not targeted at
+ *     any specific device). "อัพเดทตอนนี้" here is acknowledge-only, same as
+ *     before this device-targeting feature existed - see FirmwareUpdateToast
+ *     for what it actually does.
  */
 export function FirmwareReleaseModal({ open, release, onUpdate, onRemindLater }) {
   if (!open || !release) return null;
@@ -22,21 +29,29 @@ export function FirmwareReleaseModal({ open, release, onUpdate, onRemindLater })
             <Sparkles className="size-7" />
           </div>
           <h3 className="text-lg font-extrabold">มีเฟิร์มแวร์ ESP32 เวอร์ชันใหม่!</h3>
+          {release.deviceLabel && <p className="mt-1 text-xs text-white/70">{release.deviceLabel}</p>}
           <p className="mt-1 text-sm text-white/85">v{release.version}</p>
         </div>
 
         <div className="p-6">
           <div className="mb-4 rounded-xl bg-[var(--muted)] p-3 text-xs">
-            <div className="flex items-center justify-between">
-              <span className="text-[var(--muted-foreground)]">ไฟล์</span>
-              <span className="font-semibold text-[var(--foreground)]">{release.filename}</span>
-            </div>
-            <div className="mt-1.5 flex items-center justify-between">
-              <span className="text-[var(--muted-foreground)]">เผยแพร่เมื่อ</span>
-              <span className="font-semibold text-[var(--foreground)]">
-                {new Date(release.uploadedAt).toLocaleString("th-TH")}
-              </span>
-            </div>
+            {release.filename && (
+              <div className="flex items-center justify-between">
+                <span className="text-[var(--muted-foreground)]">ไฟล์</span>
+                <span className="font-semibold text-[var(--foreground)]">{release.filename}</span>
+              </div>
+            )}
+            {release.uploadedAt && (
+              <div className={`flex items-center justify-between ${release.filename ? "mt-1.5" : ""}`}>
+                <span className="text-[var(--muted-foreground)]">เผยแพร่เมื่อ</span>
+                <span className="font-semibold text-[var(--foreground)]">
+                  {new Date(release.uploadedAt).toLocaleString("th-TH")}
+                </span>
+              </div>
+            )}
+            {release.releaseNotes && (
+              <p className="mt-1.5 whitespace-pre-wrap text-[var(--muted-foreground)]">{release.releaseNotes}</p>
+            )}
           </div>
 
           <div className="flex flex-col gap-2">
