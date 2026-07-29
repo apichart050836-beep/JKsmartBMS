@@ -44,11 +44,23 @@ esp32:
   board: esp32dev
   framework:
     type: arduino
+  # Custom partition table - the default ESP32 scheme has only ONE app slot,
+  # which can't do safe OTA (there'd be nowhere to write a new image without
+  # overwriting the one currently running). partitions.csv (repo root) adds
+  # ota_0/ota_1 + otadata so ota_updater can write the new firmware to the
+  # INACTIVE slot and only switch over after it's verified good.
+  partitions: partitions.csv
 
-# Required - this is a third-party component, not built into ESPHome.
 external_components:
+  # Third-party component, not built into ESPHome.
   - source: github://syssi/esphome-jk-bms@main
     refresh: 0s  # always pull latest during setup; pin to a tag once stable
+  # Local custom component (esphome_components/ota_updater/) - polls Firebase
+  # for a new firmware version and self-flashes from GitHub. See that folder
+  # for the full implementation + Thai comments on every step.
+  - source:
+      type: local
+      path: esphome_components
 
 wifi:
   ssid: "YOUR_WIFI_SSID"
@@ -78,9 +90,19 @@ substitutions:
   # are set by an admin from that page; espBuildDate is the only one this
   # firmware itself ever writes (see on_boot below).
   firebase_admin_url: "https://jkbms-32dfe-default-rtdb.asia-southeast1.firebasedatabase.app/JK_BMS_HUB/Suntreehouse287@gmail_com/C847807A5311/admin.json"
+  # New node, polled by ota_updater (see below) - NOT written by anything in
+  # this repo yet. To publish an update, PATCH this path manually (or wire it
+  # up from the admin backend later) with:
+  #   {"latest_version": "1.2.0", "url": "https://raw.githubusercontent.com/<owner>/<repo>/<branch>/firmware/<file>.bin", "update_flag": true}
+  firebase_firmware_url: "https://jkbms-32dfe-default-rtdb.asia-southeast1.firebasedatabase.app/JK_BMS_HUB/Suntreehouse287@gmail_com/C847807A5311/firmware.json"
   # This pack is 4S LiFePO4 (4 x 3.2V) - used only for the dailyCharge/DischargeKwh
   # push below. Update if this bridge is ever pointed at a different-size pack.
   nominal_pack_voltage: "12.8"
+  # Bump this on every firmware release you push to GitHub - it's what
+  # ota_updater compares against Firebase's "latest_version" to decide
+  # whether an update is available. Keep it in sync with the version string
+  # you pass to the admin panel's firmware upload (server/routes/firmware.js).
+  current_firmware_version: "1.0.0"
 
 # Daily Ah counters for dailyChargeAh/dailyDischargeAh (status). restore_value
 # persists them through reboots via the ESP32's own flash (NVS), and
@@ -133,6 +155,16 @@ jk_bms_ble:
     protocol_version: JK02_32S
     throttle: 5s
     id: bms0
+
+# ==========================================
+# OTA updater (custom - see esphome_components/ota_updater/)
+# ==========================================
+ota_updater:
+  firebase_url: ${firebase_firmware_url}
+  current_version: ${current_firmware_version}
+  update_interval: 60s
+  max_retries: 3
+  # insecure_tls: false   # default - real root CA is embedded in ota_updater.cpp
 
 # ==========================================
 # Sensors (read side - replaces your hand-rolled parseData()/bms_settings())

@@ -62,22 +62,36 @@ export const api = {
   latestAnnouncement: () => request("/api/announcements/latest"),
   // Raw-body upload, not JSON - can't go through request()'s
   // Content-Type: application/json + JSON.stringify(body) default.
-  uploadFirmware: async (version, filename, file) => {
-    const res = await fetch(
-      `${API_BASE}/api/firmware?version=${encodeURIComponent(version)}&filename=${encodeURIComponent(filename)}`,
-      {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/octet-stream" },
-        body: file,
-      }
-    );
+  // `targets` (optional) is the list of {hubId, bmsKey} devices whose own
+  // Firebase firmware node should get this release + update_flag=true, for
+  // the ESP32-side ota_updater component to pick up - see
+  // server/routes/firmware.js.
+  uploadFirmware: async (version, filename, file, { releaseNotes, targets } = {}) => {
+    const params = new URLSearchParams({ version, filename });
+    if (releaseNotes) params.set("releaseNotes", releaseNotes);
+    if (targets && targets.length > 0) params.set("targets", JSON.stringify(targets));
+    const res = await fetch(`${API_BASE}/api/firmware?${params.toString()}`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: file,
+    });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(body.error || `Request failed (${res.status})`);
     return body;
   },
   latestFirmware: () => request("/api/firmware/latest"),
   firmwareDownloadUrl: (id) => `${API_BASE}/api/firmware/${id}/download`,
+  // Real OTA trigger - PATCHes update_flag=true at this device's own
+  // Firebase firmware node (server/routes/hubs.js). This is what the "มี
+  // อัปเดตใหม่" button actually does now, distinct from
+  // acknowledgeFirmwareRelease() (HubDataContext.jsx), which only dismisses
+  // the web notification and touches nothing in Firebase.
+  triggerFirmwareUpdate: (hubId, bmsKey) =>
+    request(`/api/hubs/${encodeURIComponent(hubId)}/firmware/trigger-update`, {
+      method: "PATCH",
+      body: JSON.stringify({ bmsKey }),
+    }),
 };
 
 export const API_BASE_URL = API_BASE;

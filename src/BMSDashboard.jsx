@@ -415,8 +415,21 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
       software: active.info?.software_version ?? null,
       hardware: active.info?.hardware_version ?? null,
       deviceLabel: active.name,
+      hubId: activeConfig.hubId ?? null,
+      bmsKey: activeConfig.bmsKey ?? null,
+      // Real per-device OTA node (admin upload -> Firebase, ESP32's
+      // ota_updater polls it) - see useBmsPackLive.js's `firmware` field.
+      firmware: active.firmware ?? null,
     });
-  }, [active.info?.software_version, active.info?.hardware_version, active.name, onSoftwareVersionChange]);
+  }, [
+    active.info?.software_version,
+    active.info?.hardware_version,
+    active.name,
+    active.firmware,
+    activeConfig.hubId,
+    activeConfig.bmsKey,
+    onSoftwareVersionChange,
+  ]);
 
   // ESP32 firmware version - real field (info.software_version), same
   // object already used for battery_type elsewhere. There's no dedicated

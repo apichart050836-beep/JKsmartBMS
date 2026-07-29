@@ -6,16 +6,50 @@ import { fileURLToPath } from "node:url";
 import { requireAuth } from "../middleware/requireAuth.js";
 import { requireRole } from "../middleware/requireRole.js";
 import { db } from "../db.js";
-import { commitFirmwareFile, isGitStorageConfigured } from "../gitStorage.js";
+import { commitFirmwareFile, getRawFirmwareUrl, isGitStorageConfigured } from "../gitStorage.js";
+import { isFirebaseConfigured } from "../firebaseAdmin.js";
+import { writePath } from "../firebaseRead.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIRMWARE_DIR = path.resolve(__dirname, "..", "firmware");
 
 // Generous headroom over a typical ESP32 .bin (~1-2MB).
 const MAX_FIRMWARE_BYTES = 8 * 1024 * 1024;
+const MAX_RELEASE_NOTES_LEN = 2000;
+const MAX_TARGETS = 50;
 
 function toReleaseJson(row) {
   return { id: row.id, version: row.version, filename: row.filename, sizeBytes: row.size_bytes, uploadedAt: row.uploaded_at };
+}
+
+// Same rule as admin.js/hubs.js - Firebase RTDB keys can't contain '.', '#',
+// '$', '[', ']', or '/'.
+function isSafeKey(k) {
+  return typeof k === "string" && k.length > 0 && !/[./#$\[\]]/.test(k);
+}
+
+function devicePath(hubId, bmsKey) {
+  return bmsKey ? `JK_BMS_HUB/${hubId}/${bmsKey}` : `JK_BMS_HUB/${hubId}`;
+}
+
+// Parses+validates the `targets` query param (JSON array of {hubId, bmsKey}
+// - bmsKey optional/null for a flat, non-nested hub). Bad entries are
+// dropped rather than failing the whole upload - the .bin is already safely
+// committed by the time this runs, so a malformed target list should degrade
+// to "published, but didn't reach that specific device", not lose the file.
+function parseTargets(raw) {
+  if (!raw) return [];
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed
+    .slice(0, MAX_TARGETS)
+    .filter((t) => t && isSafeKey(t.hubId) && (t.bmsKey === undefined || t.bmsKey === null || isSafeKey(t.bmsKey)))
+    .map((t) => ({ hubId: t.hubId, bmsKey: t.bmsKey ?? null }));
 }
 
 /**
@@ -25,13 +59,16 @@ function toReleaseJson(row) {
  * "announcement" (same "role:user" room, same live-push + catch-up-fetch
  * pattern for a dashboard that loads shortly after).
  *
- * Deliberately does NOT talk to any physical ESP32 - there's no OTA
- * transport in this app (see the explicit instruction not to touch ESP32/
- * JK BMS protocol). "Update" on the dashboard is acknowledge-only: it marks
- * the notification as seen and shows the existing update-in-progress
- * animation, nothing more. An admin who wants the new .bin on a real device
- * still flashes it themselves (USB/ESPHome dashboard) - this panel is a
- * publish + notify workflow, not a remote-flash mechanism.
+ * This server still never talks to a physical ESP32 directly - there's no
+ * OTA transport *in this app*. What it DOES do now: for every device the
+ * admin explicitly checks (`targets`), it writes {latest_version, url,
+ * release_notes, update_flag: true} to that device's own Firebase firmware
+ * node. That write is a real, meaningful signal - it's the exact path each
+ * device's own ota_updater ESPHome component (esphome_components/
+ * ota_updater/, wired into jkbms-bridge.yaml) polls on its own schedule and
+ * self-flashes from when it sees update_flag=true. No target selected =
+ * published to GitHub/the web notification only, same as before this
+ * feature existed.
  *
  * Every upload is still saved to the firmware_releases table (metadata +
  * BLOB) unconditionally - that alone is what the notification/"latest"
@@ -39,7 +76,8 @@ function toReleaseJson(row) {
  * isn't configured yet. The git commit+push is a best-effort *addition* on
  * top: it's what makes the file survive a Render redeploy without a paid
  * persistent disk (see gitStorage.js), but its failure is reported back to
- * the admin rather than made a hard blocker on publishing.
+ * the admin rather than made a hard blocker on publishing - and skips the
+ * Firebase writes entirely, since there'd be no real URL to give a device.
  */
 export function createFirmwareRouter(io) {
   const router = Router();
@@ -52,6 +90,8 @@ export function createFirmwareRouter(io) {
     async (req, res) => {
       const version = String(req.query.version ?? "").trim();
       const filename = String(req.query.filename ?? "firmware.bin").trim();
+      const releaseNotes = String(req.query.releaseNotes ?? "").trim().slice(0, MAX_RELEASE_NOTES_LEN);
+      const targets = parseTargets(req.query.targets);
       if (!version) return res.status(400).json({ error: "Version required" });
       if (version.length > 40) return res.status(400).json({ error: "Version too long" });
       if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
@@ -67,11 +107,40 @@ export function createFirmwareRouter(io) {
         .run(version, filename, req.body.length, req.body, req.user.email, uploadedAt);
 
       let gitError = null;
+      let rawUrl = null;
       try {
         await commitFirmwareFile(filename, req.body);
+        // "nothing to commit" (identical bytes re-uploaded) still means the
+        // file is already on GitHub at this path - the URL is still valid.
+        rawUrl = await getRawFirmwareUrl(filename);
       } catch (err) {
         console.error(`Firmware git push failed: ${err.message}`);
         gitError = err.message;
+      }
+
+      // Real per-device OTA signal (polled by each device's own ESP32
+      // ota_updater component - see jkbms-bridge.yaml) - separate from the
+      // firmware_releases row above, which only powers the web dashboard's
+      // notification badge. Best-effort per target: one device's write
+      // failing (bad hubId, Firebase hiccup) doesn't roll back the others or
+      // the publish itself, since the file's already safely on GitHub.
+      const firebaseResults = [];
+      if (rawUrl && isFirebaseConfigured && targets.length > 0) {
+        for (const target of targets) {
+          try {
+            await writePath(`${devicePath(target.hubId, target.bmsKey)}/firmware`, {
+              latest_version: version,
+              url: rawUrl,
+              release_notes: releaseNotes || null,
+              uploaded_at: uploadedAt,
+              update_flag: true,
+            });
+            firebaseResults.push({ ...target, ok: true });
+          } catch (err) {
+            console.error(`Firmware Firebase write failed for ${target.hubId}/${target.bmsKey ?? ""}: ${err.message}`);
+            firebaseResults.push({ ...target, ok: false, error: err.message });
+          }
+        }
       }
 
       const release = toReleaseJson({
@@ -82,7 +151,7 @@ export function createFirmwareRouter(io) {
         uploaded_at: uploadedAt,
       });
       io.to("role:user").emit("firmware:release", release);
-      res.json({ ok: true, release, gitError });
+      res.json({ ok: true, release, gitError, rawUrl, firebaseResults });
     }
   );
 

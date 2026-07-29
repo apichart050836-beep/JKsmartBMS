@@ -110,6 +110,31 @@ router.patch("/:hubId/location", requireAuth, requireFirebase, async (req, res) 
   }
 });
 
+// Real OTA trigger - flips update_flag=true at this device's own firmware
+// node (written by the admin's upload panel, see server/routes/firmware.js).
+// This is the signal the ESP32's own ota_updater component polls for; the
+// server never talks to the device directly, it only sets the flag the
+// device is already checking on its own schedule. Any session that owns
+// this hub may call it (not admin-only) since it's the "user presses the
+// Update button on their own dashboard" flow.
+router.patch("/:hubId/firmware/trigger-update", requireAuth, requireFirebase, async (req, res) => {
+  const { hubId } = req.params;
+  const { bmsKey } = req.body ?? {};
+  if (!isSafeKey(hubId) || !canAccessHub(req.user, hubId)) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  if (bmsKey !== undefined && bmsKey !== null && !isSafeKey(bmsKey)) {
+    return res.status(400).json({ error: "Invalid request" });
+  }
+  try {
+    await writePath(`${devicePath(hubId, bmsKey)}/firmware/update_flag`, true);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(`PATCH /api/hubs/${hubId}/firmware/trigger-update failed: ${err.message}`);
+    res.status(503).json({ error: "Could not trigger update" });
+  }
+});
+
 router.patch("/:hubId/device-name", requireAuth, requireFirebase, async (req, res) => {
   const { hubId } = req.params;
   const { bmsKey, name } = req.body ?? {};

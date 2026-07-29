@@ -1,0 +1,22 @@
+# Partition table แบบกำหนดเอง สำหรับบอร์ด ESP32 flash 4MB - จำเป็นสำหรับ
+# ota_updater component เพราะต้องมี "ota_0" และ "ota_1" (2 app partition)
+# ให้สลับเขียนได้ ไม่ใช่ partition scheme เริ่มต้นที่มี app slot เดียว
+#
+# เหตุผลที่ต้องมี 2 app partition (นี่คือกลไกที่ทำให้ OTA "ไม่มีทางทำบอร์ด
+# brick" ได้จริงๆ ไม่ใช่แค่คำโฆษณา):
+#   - บอร์ดบูตจาก partition ที่ "otadata" ชี้อยู่ (สมมติ app0) เสมอ
+#   - ตอนอัปเดต โค้ดใน ota_updater.cpp จะเขียนไฟล์ใหม่ลง "อีก" partition
+#     (app1) เท่านั้น - ไม่แตะ app0 ที่กำลังบูตอยู่เลยตลอดกระบวนการ
+#   - ต่อเมื่อ Update.end(true) ตรวจสอบว่าไฟล์ครบถ้วน ไม่ corrupt (เช็คขนาด
+#     + md5) "สำเร็จ" เท่านั้น otadata ถึงจะถูกเปลี่ยนให้ชี้ไป app1 แล้ว
+#     ค่อยรีสตาร์ท
+#   - ถ้าอัปเดตล้มเหลว/ไฟล์เสีย/ไฟดับกลางทาง - otadata ยังชี้ app0 (ของเดิม)
+#     เหมือนเดิมทุกประการ บอร์ดรีสตาร์ทแล้วบูตเฟิร์มแวร์เดิมได้ตามปกติ
+#
+# Name,     Type, SubType,  Offset,   Size,     Flags
+nvs,        data, nvs,      0x9000,   0x5000,
+otadata,    data, ota,      0xe000,   0x2000,
+app0,       app,  ota_0,    0x10000,  0x1E0000,
+app1,       app,  ota_1,    0x1F0000, 0x1E0000,
+spiffs,     data, spiffs,   0x3D0000, 0x20000,
+coredump,   data, coredump, 0x3F0000, 0x10000,

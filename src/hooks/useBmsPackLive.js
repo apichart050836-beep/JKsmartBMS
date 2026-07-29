@@ -238,6 +238,12 @@ export function useBmsPackLive(config) {
     lastUpdateAt,
     error: null,
     info,
+    // Real OTA signal node (admin upload -> writePath, ESP32's own
+    // ota_updater component polls this same path) - null until an admin has
+    // published at least once for this specific device. Distinct from the
+    // SQLite-backed firmwareRelease in HubDataContext, which only powers the
+    // acknowledge-only web notification and isn't device-scoped.
+    firmware: raw?.firmware ?? null,
     remoteSettings,
     ratedCapacityAh,
     soc,

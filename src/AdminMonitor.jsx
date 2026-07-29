@@ -415,8 +415,8 @@ export default function AdminMonitor() {
         <AnnounceModal onClose={() => setShowAnnounce(false)} />
       </Modal>
 
-      <Modal open={showFirmwareUpload} onClose={() => setShowFirmwareUpload(false)} title="ESP32 Firmware Update" maxWidthClass="max-w-md">
-        <FirmwareUploadModal onClose={() => setShowFirmwareUpload(false)} currentRelease={latestRelease} />
+      <Modal open={showFirmwareUpload} onClose={() => setShowFirmwareUpload(false)} title="ESP32 Firmware Update" maxWidthClass="max-w-lg">
+        <FirmwareUploadModal onClose={() => setShowFirmwareUpload(false)} currentRelease={latestRelease} devices={rows} />
       </Modal>
     </div>
   );

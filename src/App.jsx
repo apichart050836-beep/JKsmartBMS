@@ -12,6 +12,7 @@ import { LogoutModal } from "./components/LogoutModal.jsx";
 import { VersionCheckModal } from "./components/VersionCheckModal.jsx";
 import { FirmwareUpdateToast } from "./components/FirmwareUpdateToast.jsx";
 import { FirmwareReleaseModal } from "./components/FirmwareReleaseModal.jsx";
+import { api } from "./lib/apiClient.js";
 
 // Badge next to the Dashboard pill + its two popups (manual check, and the
 // auto "new firmware" notice). A separate component (not inline in
@@ -27,10 +28,42 @@ function UpdateBadge({ deviceVersions }) {
   // "เตือนภายหลัง"/close only hides the auto-popup for this session (not
   // acknowledged) - it reappears on the next load, per its own label.
   const [autoPopupDismissedThisSession, setAutoPopupDismissedThisSession] = useState(false);
+  // Real per-device OTA trigger state (server/routes/hubs.js's
+  // trigger-update route) - separate from the acknowledge-only toast, which
+  // fires regardless of whether a real signal was actually sent.
+  const [updating, setUpdating] = useState(false);
+  const [updateError, setUpdateError] = useState(null);
+  const [updateSent, setUpdateSent] = useState(false);
 
-  function showUpdateToast() {
-    setManualUpdateToast({ deviceLabel: deviceVersions.deviceLabel, version: deviceVersions.software });
+  function showUpdateToast(status) {
+    setManualUpdateToast({ deviceLabel: deviceVersions.deviceLabel, version: deviceVersions.software, status });
     setTimeout(() => setManualUpdateToast(null), 6000);
+  }
+
+  const deviceFirmware = deviceVersions.firmware;
+  const realIsNew = !!deviceFirmware?.latest_version && deviceFirmware.latest_version !== deviceVersions.software;
+  const badgeIsNew = firmwareIsNew || realIsNew;
+
+  async function handleRealUpdate() {
+    acknowledgeFirmwareRelease();
+    if (!deviceVersions.hubId) {
+      // No live device backing this tab (shouldn't happen - the badge is
+      // hidden without a software version - but guards against a stale
+      // click racing a tab switch).
+      return;
+    }
+    setUpdating(true);
+    setUpdateError(null);
+    try {
+      await api.triggerFirmwareUpdate(deviceVersions.hubId, deviceVersions.bmsKey);
+      setUpdateSent(true);
+      showUpdateToast("sent");
+    } catch (err) {
+      setUpdateError(err.message || "ส่งคำสั่งไม่สำเร็จ");
+      showUpdateToast("error");
+    } finally {
+      setUpdating(false);
+    }
   }
 
   if (!deviceVersions.software) return null;
@@ -39,17 +72,21 @@ function UpdateBadge({ deviceVersions }) {
     <>
       <button
         type="button"
-        onClick={() => setShowVersionModal(true)}
+        onClick={() => {
+          setUpdateError(null);
+          setUpdateSent(false);
+          setShowVersionModal(true);
+        }}
         title="ตรวจสอบอัพเดทเฟิร์มแวร์ ESP32"
         className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-semibold transition-colors ${
-          firmwareIsNew
+          badgeIsNew
             ? "bg-[var(--brand)] text-white shadow-sm hover:opacity-90"
             : "bg-[var(--brand-10)] text-[var(--brand)] hover:opacity-80"
         }`}
       >
         <Cpu className="size-3" />
         Update
-        {firmwareIsNew && <span className="ml-0.5 size-1.5 animate-pulse rounded-full bg-white" />}
+        {badgeIsNew && <span className="ml-0.5 size-1.5 animate-pulse rounded-full bg-white" />}
       </button>
 
       <VersionCheckModal
@@ -58,13 +95,12 @@ function UpdateBadge({ deviceVersions }) {
         deviceLabel={deviceVersions.deviceLabel}
         softwareVersion={deviceVersions.software}
         hardwareVersion={deviceVersions.hardware}
-        latestRelease={firmwareRelease}
-        releaseIsNew={firmwareIsNew}
-        onUpdate={() => {
-          setShowVersionModal(false);
-          acknowledgeFirmwareRelease();
-          showUpdateToast();
-        }}
+        deviceFirmware={deviceFirmware}
+        fallbackRelease={firmwareRelease}
+        updating={updating}
+        updateError={updateError}
+        updateSent={updateSent}
+        onUpdate={handleRealUpdate}
       />
       <FirmwareReleaseModal
         open={firmwareIsNew && !autoPopupDismissedThisSession}
@@ -102,7 +138,14 @@ function AuthedApp() {
   // Versions of whichever device BMSDashboard currently has active - lifted
   // up via a callback since the badge/button it's shown next to lives here,
   // outside BMSDashboard itself.
-  const [deviceVersions, setDeviceVersions] = useState({ software: null, hardware: null, deviceLabel: null });
+  const [deviceVersions, setDeviceVersions] = useState({
+    software: null,
+    hardware: null,
+    deviceLabel: null,
+    hubId: null,
+    bmsKey: null,
+    firmware: null,
+  });
   const pages = PAGES.filter((p) => (p.adminOnly ? user.role === "admin" : !p.userOnly || user.role !== "admin"));
   const activePage = pages.find((p) => p.id === page) ? page : defaultPage;
 
