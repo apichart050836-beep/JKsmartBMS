@@ -14,10 +14,23 @@ const FIRMWARE_DIR = path.join(REPO_ROOT, "firmware");
 // storage has on Render's Free tier: a redeploy re-clones the repo fresh,
 // so a file that's actually IN the git tree comes back automatically, where
 // an ephemeral-disk-only SQLite blob would not (see db.js's matching
-// comment). Auth uses a short-lived `http.extraheader` for this one push
-// only - never persists a token into .git/config.
+// comment).
 function run(args, options = {}) {
   return execFileAsync("git", args, { cwd: REPO_ROOT, ...options });
+}
+
+// Node's execFile throws an Error whose .message/.cmd/.stdout/.stderr can
+// contain the FULL argv of the failed command - if that command embedded a
+// credential (either an authenticated URL or an Authorization header), the
+// raw token ends up in the thrown error, and from there in whatever surfaces
+// it (this app shows gitError text directly in the admin UI - confirmed live
+// 2026-07-29: a push failure put the base64-encoded PAT straight into the
+// browser). Every function that touches GITHUB_TOKEN must route its errors
+// through this before they leave gitStorage.js.
+function redactToken(text) {
+  const token = process.env.GITHUB_TOKEN;
+  if (!token || !text) return text;
+  return text.split(token).join("***").split(Buffer.from(token).toString("base64")).join("***");
 }
 
 export function isGitStorageConfigured() {
@@ -103,7 +116,6 @@ export async function commitFirmwareFile(filename, data) {
   fs.writeFileSync(filePath, data);
 
   const relPath = `firmware/${filename}`;
-  const authHeader = `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${process.env.GITHUB_TOKEN}`).toString("base64")}`;
 
   await run(["add", relPath]);
   // Nothing to commit (identical bytes re-uploaded) isn't an error - the
@@ -117,18 +129,38 @@ export async function commitFirmwareFile(filename, data) {
 
   const { owner, repo } = await resolveOwnerRepo();
   const branch = await resolveBranch();
-  const remoteUrl = `https://github.com/${owner}/${repo}.git`;
+  const cleanUrl = `https://github.com/${owner}/${repo}.git`;
 
   // Explicitly (re)point "origin" at the real repo before every push -
-  // regardless of whatever "origin" this checkout came with (or didn't),
-  // this guarantees the push target is always correct instead of trusting
-  // whatever the deploy happened to leave configured.
+  // regardless of whatever "origin" this checkout came with (or didn't) -
+  // cosmetic/for-debugging only now (the push itself below doesn't depend on
+  // it), so any failure here is silently ignored rather than aborting.
   try {
-    await run(["remote", "set-url", "origin", remoteUrl]);
+    await run(["remote", "set-url", "origin", cleanUrl]);
   } catch {
-    await run(["remote", "add", "origin", remoteUrl]);
+    try {
+      await run(["remote", "add", "origin", cleanUrl]);
+    } catch {
+      /* best-effort only - see comment above */
+    }
   }
 
-  await run(["-c", `http.extraheader=${authHeader}`, "push", "origin", `HEAD:refs/heads/${branch}`]);
+  // Push via an explicit, credentialed URL argument rather than `-c
+  // http.extraheader` against the named "origin" remote - the extraheader
+  // approach is what previously failed on Render with "could not read
+  // Username for 'https://github.com'" (git falling through to an
+  // interactive credential prompt despite the header being set, in a
+  // container with no TTY to prompt on). Embedding x-access-token:<PAT> in
+  // the URL is GitHub's own documented scripted-push pattern and doesn't
+  // depend on how a given git build's credential/header stack behaves.
+  // Passed only as this one process's argv (never written to .git/config,
+  // same as the header approach was trying to guarantee) - but argv IS
+  // visible in a thrown exec error, so every catch below redacts it.
+  const authedUrl = `https://x-access-token:${process.env.GITHUB_TOKEN}@github.com/${owner}/${repo}.git`;
+  try {
+    await run(["push", authedUrl, `HEAD:refs/heads/${branch}`]);
+  } catch (err) {
+    throw new Error(redactToken(err.stderr || err.message || "git push failed"));
+  }
   return { pushed: true };
 }
