@@ -7,3 +7,7 @@ serviceAccountKey.json
 server/data/
 .claude/
 *.rar
+# Stray firmware .bin files dropped at the repo root during local testing -
+# the real published copies live under server/firmware/ (committed
+# explicitly by server/gitStorage.js), not here.
+/*.bin
