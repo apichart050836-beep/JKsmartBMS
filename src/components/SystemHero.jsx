@@ -147,8 +147,7 @@ export function SystemHero({
         const xhr = new XMLHttpRequest();
         // Same-origin in production (apiClient.js's API_BASE_URL) - a
         // hardcoded localhost:4000 fallback here sent the deployed site's
-        // own visitors off to try reaching their own machine on port 4000
-        // (see the identical fix in ESPHomeUpdater.jsx).
+        // own visitors off to try reaching their own machine on port 4000.
         const backendUrl = `${API_BASE_URL}/api/esphome/update`;
 
         xhr.upload.onprogress = (event) => {

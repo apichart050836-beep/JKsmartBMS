@@ -21,7 +21,6 @@ import BMSDashboard from "./BMSDashboard.jsx";
 import AdminMonitor from "./AdminMonitor.jsx";
 import Login from "./Login.jsx";
 import HomePage from "./HomePage.jsx";
-import ESPHomeUpdater from "./ESPHomeUpdater.jsx";
 import { ThemeRoot } from "./components/ThemeRoot.jsx";
 import { ThemeProvider } from "./context/ThemeContext.jsx";
 import { AuthProvider, useAuth } from "./context/AuthContext.jsx";
@@ -461,11 +460,6 @@ const PAGES = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, userOnly: true },
   { id: "admin", label: "Admin Monitor", icon: ShieldCheck, adminOnly: true },
   { id: "install-firmware", label: "Install Firmware", icon: Download },
-  // Was missing from this list entirely - the activePage === "firmware"
-  // render block below (<ESPHomeUpdater />) existed but had no nav button
-  // that could ever set page to "firmware", making it unreachable from the
-  // UI on the deployed site.
-  { id: "firmware", label: "Firmware Update (Network)", icon: Upload },
 ];
 
 function AuthedApp() {
@@ -522,12 +516,6 @@ function AuthedApp() {
 
       {activePage === "dashboard" && <BMSDashboard />}
       {activePage === "admin" && <AdminMonitor />}
-
-      {activePage === "firmware" && (
-        <div className="mx-auto max-w-7xl px-3 py-6 sm:px-5 md:px-7">
-          <ESPHomeUpdater />
-        </div>
-      )}
 
       {activePage === "install-firmware" && (
         <div className="mx-auto max-w-7xl px-3 py-6 sm:px-5 md:px-7">
