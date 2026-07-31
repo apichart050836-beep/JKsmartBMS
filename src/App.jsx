@@ -460,8 +460,12 @@ function ESPFirmwareInstaller() {
 const PAGES = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, userOnly: true },
   { id: "admin", label: "Admin Monitor", icon: ShieldCheck, adminOnly: true },
- 
   { id: "install-firmware", label: "Install Firmware", icon: Download },
+  // Was missing from this list entirely - the activePage === "firmware"
+  // render block below (<ESPHomeUpdater />) existed but had no nav button
+  // that could ever set page to "firmware", making it unreachable from the
+  // UI on the deployed site.
+  { id: "firmware", label: "Firmware Update (Network)", icon: Upload },
 ];
 
 function AuthedApp() {
