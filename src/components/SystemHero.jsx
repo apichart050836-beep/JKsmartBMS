@@ -109,7 +109,7 @@ export function SystemHero({
         setUpdateProgress(0);
 
         // 🎯 ใช้ Relative Path ได้เลย! Vite Proxy จะส่งไป http://localhost:4000/api/esphome/update ให้เอง
-        const backendUrl = "/api/esphome/update";
+        const backendUrl = "http://localhost:4000/api/esphome/update";
 
         const formData = new FormData();
         formData.append("file", selectedFile);
