@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { statusTone } from "../lib/tone.js";
 import { ElectricGauge } from "../ElectricGauge.jsx";
+import { API_BASE_URL } from "../lib/apiClient.js";
 
 const HEALTH_TONE_TEXT = {
     excellent: "text-emerald-600",
@@ -144,8 +145,11 @@ export function SystemHero({
         }
 
         const xhr = new XMLHttpRequest();
-        const backendBase = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
-        const backendUrl = `${backendBase}/api/esphome/update`;
+        // Same-origin in production (apiClient.js's API_BASE_URL) - a
+        // hardcoded localhost:4000 fallback here sent the deployed site's
+        // own visitors off to try reaching their own machine on port 4000
+        // (see the identical fix in ESPHomeUpdater.jsx).
+        const backendUrl = `${API_BASE_URL}/api/esphome/update`;
 
         xhr.upload.onprogress = (event) => {
             if (event.lengthComputable) {
