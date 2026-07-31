@@ -66,7 +66,7 @@ export function SystemHero({
     alarms = [],
     onOpenAlarms,
     onFirmwareUpdate,
-    firmwareVersion = "v1.2.4",
+    firmwareVersion = "v1.2.4.3",
 }) {
     const isCharging = status === "Charging";
   
