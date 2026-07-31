@@ -5,6 +5,10 @@ import cookieParser from "cookie-parser";
 import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import multer from "multer";
+import axios from "axios";
+import FormData from "form-data";
+
 import { migrate } from "./db.js";
 import authRoutes from "./routes/auth.js";
 import hubsRoutes from "./routes/hubs.js";
@@ -16,17 +20,16 @@ import { attachRealtime } from "./realtime.js";
 import { startTelemetryLogger } from "./telemetryLogger.js";
 import { startChargeWatchdog } from "./chargeWatchdog.js";
 import { isAllowedOrigin } from "./corsOrigin.js";
-import { Readable } from "node:stream";
-import multer from "multer";
-import axios from "axios";
-import FormData from "form-data";
 
 migrate();
 startTelemetryLogger();
 startChargeWatchdog();
 
 const app = express();
+
+// 🎯 ตั้งค่า Multer สำหรับรับไฟล์อัปโหลดไว้ใน Memory ชั่วคราว
 const upload = multer({ storage: multer.memoryStorage() });
+
 // Scoped to /api only - the built frontend is served same-origin from this
 // same process (see express.static below), and same-origin requests for
 // module scripts/stylesheets still carry a crossorigin attribute (Vite's
@@ -47,71 +50,58 @@ app.use(
 app.use(express.json());
 app.use(cookieParser());
 
+// Routes หลักของระบบ
 app.use("/api/auth", authRoutes);
 app.use("/api/hubs", hubsRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/hubs", historyRoutes);
-// ==========================================
-// 🚀 เพิ่ม Route อัปเดต Firmware ESPHome ที่นี่
-// ==========================================
+
+// =========================================================
+// 🚀 Route สำหรับเป็น Proxy ส่ง Firmware ไปยัง ESPHome (Direct/LAN)
+// =========================================================
 app.post("/api/esphome/update", upload.single("file"), async (req, res) => {
   try {
     const { deviceIp, password } = req.body;
     const file = req.file;
 
-    if (!deviceIp || !file) {
-      return res.status(400).json({ error: "Missing deviceIp or file" });
+    if (!file || !deviceIp) {
+      return res.status(400).json({ error: "กรุณาส่งไฟล์และ IP Address มาให้ครบถ้วน" });
     }
 
-    console.log(`[OTA] Starting update for target: http://${deviceIp}/update`);
-    console.log(`[OTA] File name: ${file.originalname}, Size: ${file.size} bytes`);
-
-    // สร้าง FormData โดยใช้ form-data package
-    const formData = new FormData();
-    
-    // แปลง Buffer เป็น Readable Stream ชัดเจน ป้องกันปัญหา source.on is not a function
-    const fileStream = Readable.from(file.buffer);
-
-    formData.append("file", fileStream, {
+    const form = new FormData();
+    form.append("file", file.buffer, {
       filename: file.originalname || "firmware.bin",
       contentType: "application/octet-stream",
-      knownLength: file.size, // ระบุขนาดไฟล์ให้ ESPHome ทราบ
     });
 
     if (password) {
-      formData.append("password", password);
+      form.append("password", password);
     }
 
     const targetUrl = `http://${deviceIp}/update`;
+    console.log(`[Proxy] กำลังส่งไฟล์ Firmware ต่อไปที่: ${targetUrl}`);
 
-    // ส่งไฟล์ด้วย Axios โดยกำหนด Headers จาก formData โดยตรง
-    const response = await axios.post(targetUrl, formData, {
+    const response = await axios.post(targetUrl, form, {
       headers: {
-        ...formData.getHeaders(),
+        ...form.getHeaders(),
       },
-      maxBodyLength: Infinity,
-      maxContentLength: Infinity,
-      timeout: 180000, // Timeout 3 นาที
+      timeout: 120000, // กำหนด Timeout ไว้ที่ 2 นาที
     });
 
-    console.log(`[OTA Success] Response from ESPHome (${deviceIp}):`, response.data);
-    return res.status(200).send(response.data || "OK");
+    return res.status(200).json({
+      message: "อัปเดต Firmware ลง ESP32 สำเร็จ",
+      espStatus: response.status,
+    });
+
   } catch (error) {
-    console.error("[OTA Error Details]:", error.message);
-
-    if (error.code === "ECONNABORTED" || error.code === "ETIMEDOUT") {
-      return res.status(504).json({
-        error: `Gateway Timeout: ESPHome (${req.body.deviceIp}) ไม่ตอบสนองภายในเวลาที่กำหนด`,
-      });
-    }
-
+    console.error("[Proxy Error]:", error.message);
     return res.status(500).json({
-      error: "Firmware update failed",
-      details: error.message,
+      error: "ไม่สามารถส่งไฟล์ไปที่ ESP32 ได้",
+      details: error.response ? error.response.data : error.message,
     });
   }
 });
-
+// =========================================================
 
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
