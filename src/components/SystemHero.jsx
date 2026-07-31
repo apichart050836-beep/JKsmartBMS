@@ -99,66 +99,65 @@ export function SystemHero({
         }
     };
 
-    const handleStartUpdate = async (e) => {
+   const handleStartUpdate = async (e) => {
         if (e) e.preventDefault();
-
-        // 🎯 Log เช็กว่าเข้าฟังก์ชันแน่นอน
-        console.log("1. กดปุ่ม Submit Direct OTA แล้ว!");
-        console.log("2. ไฟล์ที่เลือกคือ:", selectedFile);
-        console.log("3. Target IP:", deviceIp);
-
-        if (!selectedFile || !deviceIp) {
-            alert("กรุณาเลือกไฟล์ .bin และระบุ IP Address");
-            return;
-        }
+        if (!selectedFile || !deviceIp) return;
 
         setIsUpdating(true);
         setFlashStage("uploading");
-        setStatusMessage(`[1/2] กำลังส่งไฟล์ Firmware ตรงไปยัง ESP32 (${deviceIp})... ห้ามปิดหน้านี้`);
+        setStatusMessage("[1/2] กำลังส่งไฟล์ Firmware ไปยัง Backend Server...");
         setUpdateProgress(0);
 
-        // 🎯 1. กำหนด Direct URL วิ่งไปที่ ESP32 ในวง LAN โดยตรง
-        const directUrl = `http://${deviceIp}/update`;
-        console.log("🚀 กำลังส่งไฟล์ Direct OTA ไปที่ URL:", directUrl);
+        // 🎯 ใช้ Relative Path ได้เลย! Vite Proxy จะส่งไป http://localhost:4000/api/esphome/update ให้เอง
+        const backendUrl = "/api/esphome/update";
 
-        // 🎯 2. จัดเตรียม FormData สำหรับ ESPHome Web Server
         const formData = new FormData();
         formData.append("file", selectedFile);
+        formData.append("deviceIp", deviceIp);
         if (otaPassword) {
             formData.append("password", otaPassword);
         }
 
-        // 🎯 3. ใช้ XHR ยิงตรงไปหา ESP32
         const xhr = new XMLHttpRequest();
 
-        // ติดตาม Progress การอัปโหลด
         xhr.upload.onprogress = (event) => {
             if (event.lengthComputable) {
                 const percentCompleted = Math.min(100, Math.round((event.loaded * 100) / event.total));
                 setUpdateProgress(percentCompleted);
-                setStatusMessage(`[1/2] กำลังอัปโหลด Firmware เข้า ESP32 (${percentCompleted}%)`);
+
+                if (percentCompleted < 100) {
+                    setStatusMessage(`[1/2] กำลังส่งไฟล์ไปยัง Backend Server (${percentCompleted}%)`);
+                } else {
+                    setFlashStage("flashing");
+                    setStatusMessage(`[2/2] Backend กำลังเขียน Firmware ลง ESP32 (${deviceIp})... ห้ามปิดหน้านี้`);
+                }
             }
         };
 
         xhr.onload = () => {
             setIsUpdating(false);
-            if (xhr.status === 200 || xhr.status === 302) {
+            if (xhr.status === 200) {
                 setFlashStage("success");
                 setUpdateProgress(100);
                 setStatusMessage(`[2/2] ✅ อัปเดต Firmware ลง ESP32 (${deviceIp}) สำเร็จแล้ว! อุปกรณ์กำลัง Reboot...`);
             } else {
                 setFlashStage("error");
-                setStatusMessage(`❌ เกิดข้อผิดพลาดจาก ESP32 (Status: ${xhr.status} - ${xhr.statusText})`);
+                try {
+                    const res = JSON.parse(xhr.responseText);
+                    setStatusMessage(`❌ เกิดข้อผิดพลาด: ${res.error || res.details || xhr.statusText}`);
+                } catch {
+                    setStatusMessage(`❌ เกิดข้อผิดพลาดจาก Server (Status: ${xhr.status})`);
+                }
             }
         };
 
         xhr.onerror = () => {
             setIsUpdating(false);
             setFlashStage("error");
-            setStatusMessage("❌ ไม่สามารถเชื่อมต่อกับ ESP32 ได้ (กรุณาเช็กว่าคอมฯ อยู่ WiFi เดียวกับ ESP32 และเปิด CORS บน ESPHome แล้ว)");
+            setStatusMessage("❌ ไม่สามารถเชื่อมต่อกับ Backend Server ได้");
         };
 
-        xhr.open("POST", directUrl, true);
+        xhr.open("POST", backendUrl, true);
         xhr.send(formData);
     };
 
