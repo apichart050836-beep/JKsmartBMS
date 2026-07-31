@@ -66,7 +66,15 @@ export function useAdminHubs() {
         : socketConnected && !!lastSeenAt && now - lastSeenAt < STALE_AFTER_MS,
       expireDate: admin.expirationDate ?? data.expire_date ?? null,
       buildDate: isNested ? (hubs[hubId]?.build_date ?? null) : admin.espBuildDate ?? null,
+      // ESP32/ESPHome's own reported version (same source VersionCheckModal
+      // labels "ESP32 Software" on the user Dashboard).
       firmwareVersion: data.firmware_version ?? data.info?.software_version ?? null,
+      // The physical JK BMS chip's own version, read over BLE - a totally
+      // separate piece of hardware from the ESP32, and not something this
+      // app's OTA system can ever flash (same source VersionCheckModal
+      // labels "BMS Version"). Kept as its own field so the admin table
+      // doesn't conflate the two the way a single "Firmware" column would.
+      bmsVersion: data.info?.hardware_version ?? null,
       settingsPathBase: isNested ? `JK_BMS_HUB/${hubId}/${bmsKey}` : `JK_BMS_HUB/${hubId}`,
       enabled: admin.enabled ?? true,
     };

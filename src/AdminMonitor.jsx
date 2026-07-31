@@ -168,7 +168,7 @@ function HubSummaryRow({ hubId, devices, expanded, onToggle }) {
       className="cursor-pointer border-b border-[var(--border)] bg-[var(--muted)]/40 hover:bg-[var(--muted)]/70"
       onClick={onToggle}
     >
-      <td className="py-3 pl-5 pr-3" colSpan={6}>
+      <td className="py-3 pl-5 pr-3" colSpan={7}>
         <div className="flex items-center gap-2">
           {expanded ? (
             <ChevronDown className="size-4 shrink-0 text-[var(--muted-foreground)]" />
@@ -200,8 +200,14 @@ function DeviceRow({ row, onViewDetails, onViewStatus }) {
       </td>
       <td className="px-3 py-3 text-sm text-[var(--muted-foreground)]">
         {row.firmwareVersion || "—"}
-        {/* No OTA-availability signal exists anywhere in Firebase yet - not
-            fabricating one, this column just shows the reported version. */}
+        {/* This is the ESP32/ESPHome side (what the OTA panel above actually
+            flashes) - see BMS Firmware column for the separate BLE chip. */}
+      </td>
+      <td className="px-3 py-3 text-sm text-[var(--muted-foreground)]">
+        {row.bmsVersion || "—"}
+        {/* The physical JK BMS chip's own version, read over BLE - a
+            different piece of hardware from the ESP32 and not something this
+            app's OTA system can ever update. */}
       </td>
       <td className="px-3 py-3 text-sm text-[var(--muted-foreground)]">{row.buildDate || "—"}</td>
       <td className="px-3 py-3">
@@ -361,13 +367,14 @@ export default function AdminMonitor() {
 
         {/* Device list */}
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[860px] border-collapse">
+          <table className="w-full min-w-[960px] border-collapse">
             <thead>
               <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
                 <th className="py-2.5 pl-5 pr-3">HUB / Account ID</th>
                 <th className="px-3 py-2.5">BMS Device</th>
                 <th className="px-3 py-2.5">Status</th>
                 <th className="px-3 py-2.5">ESP Firmware</th>
+                <th className="px-3 py-2.5">BMS Firmware</th>
                 <th className="px-3 py-2.5">Build Date</th>
                 <th className="px-3 py-2.5">Expiration Date</th>
                 <th className="py-2.5 pl-3 pr-5 text-right">Action</th>

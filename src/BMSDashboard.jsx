@@ -739,12 +739,17 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
   //   than this isn't achievable from content-diffing alone without the
   //   ESP32 itself writing a real per-push heartbeat field, which is out
   //   of scope (ESP32 firmware/protocol changes weren't requested).
+  // 90s - confirmed live (2026-07-28) that a shorter threshold false-flags
+  // Offline on a perfectly healthy device: uptime_seconds only advances in
+  // fixed +60s jumps and status can legitimately stay frozen 40+s while
+  // idle/stable. Do not shorten this without re-confirming against live data.
   const STALE_AFTER_MS = 90000;
+
   const isOnline = active.isLive
     ? !!active.firebaseConnected &&
       !!active.lastUpdateAt &&
       now.getTime() - active.lastUpdateAt < STALE_AFTER_MS
-    : true;
+    : false; // ถ้าไม่ใช่ Live Data ให้ default เป็น Offline (false)
 
   // Auto-pops when the active pack goes offline, asking the user to
   // refresh - but only after 5s of SUSTAINED offline, not the instant
@@ -836,6 +841,7 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
               maxBalancerCurrentA={settings.maxBalCurrent}
               power={active.power}
               status={active.status}
+              info={active.info}
               current={active.current}
               packVoltage={active.packVoltage}
               ratedCapacityAh={effectiveCapacityAh}
@@ -973,8 +979,9 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
                                               </div>
                                           </section>
 
+          
+          {/* ✅ แก้เป็นแบบนี้ */}
           <ChargeDischargeChart history={active.powerHistory} hubId={activeConfig.hubId} bmsKey={activeConfig.bmsKey} />
-
           {/* Communication: CAN / UART1-3 protocol status */}
           <CommunicationPanel remoteSettings={active.remoteSettings} />
         </div>

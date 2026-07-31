@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect} from "react";
 import {
     Zap,
     Activity,
@@ -6,12 +6,18 @@ import {
     RefreshCw,
     Power,
     BellRing,
+    Cpu,
+    X,
+    Upload,
+    CheckCircle2,
+    AlertTriangle,
+    Server,
+    KeyRound,
+    BatteryCharging, PlugZap ,Lightbulb 
 } from "lucide-react";
 import { statusTone } from "../lib/tone.js";
 import { ElectricGauge } from "../ElectricGauge.jsx";
 
-// Matches batteryHealthScore.js's 5 rating tiers - Excellent=green,
-// Very Good=light green, Good=yellow, Fair=orange, Poor=red.
 const HEALTH_TONE_TEXT = {
     excellent: "text-emerald-600",
     "very-good": "text-emerald-400",
@@ -30,6 +36,7 @@ const HEALTH_TONE_BG = {
 export function SystemHero({
     deviceLabel,
     deviceMac,
+    info, // <-- รับวัตถุ info (ห้ามระบุ deviceIp ซ้ำใน Props นี้)
     hubAccount,
     isOnline,
     onRefresh,
@@ -58,8 +65,128 @@ export function SystemHero({
     now = new Date(),
     alarms = [],
     onOpenAlarms,
+    onFirmwareUpdate,
+    firmwareVersion = "v1.2.4",
 }) {
     const isCharging = status === "Charging";
+  
+    // 1. ดึง IP จาก info.esp_ip_address มาเตรียมไว้
+    const initialIp = info?.esp_ip_address || "";
+ 
+    // 2. State สำหรับ Firmware Update Modal
+    const [isFwModalOpen, setIsFwModalOpen] = useState(false);
+    const [deviceIp, setDeviceIp] = useState(initialIp); // <-- ประกาศแค่จุดนี้จุดเดียว
+    const [otaPassword, setOtaPassword] = useState("");
+    const [selectedFile, setSelectedFile] = useState(null);
+    const [isUpdating, setIsUpdating] = useState(false);
+    const [updateProgress, setUpdateProgress] = useState(0);
+    const [flashStage, setFlashStage] = useState("idle");
+    const [statusMessage, setStatusMessage] = useState("");
+
+    // 3. ใช้ useEffect อัปเดตค่าเข้า State ทันทีเมื่อเปิด Modal หรือเมื่อ info ถูกโหลดมาสำเร็จ
+    useEffect(() => {
+        if (isFwModalOpen) {
+            setDeviceIp(info?.esp_ip_address || "");
+        }
+    }, [isFwModalOpen, info?.esp_ip_address]);
+
+    const handleFileChange = (e) => {
+        if (e.target.files && e.target.files[0]) {
+            setSelectedFile(e.target.files[0]);
+            setUpdateProgress(0);
+            setStatusMessage("");
+            setFlashStage("idle");
+        }
+    };
+
+    const handleStartUpdate = async (e) => {
+        if (e) e.preventDefault();
+        if (!selectedFile || !deviceIp) return;
+
+        setIsUpdating(true);
+        setFlashStage("uploading");
+        setStatusMessage("[1/3] กำลังส่งไฟล์ Firmware ไปยัง Server...");
+        setUpdateProgress(0);
+
+        if (onFirmwareUpdate) {
+            try {
+                await onFirmwareUpdate(
+                    {
+                        file: selectedFile,
+                        deviceIp,
+                        otaPassword,
+                    },
+                    (progress, stage, msg) => {
+                        setUpdateProgress(progress);
+                        if (stage) setFlashStage(stage);
+                        if (msg) setStatusMessage(msg);
+                    }
+                );
+                setFlashStage("success");
+                setUpdateProgress(100);
+                setStatusMessage(`[3/3] ✅ อัปเดต Firmware ลง ESP32 (${deviceIp}) สำเร็จแล้ว! อุปกรณ์กำลัง Reboot...`);
+            } catch (err) {
+                console.error("Firmware update failed:", err);
+                setFlashStage("error");
+                setStatusMessage(`❌ เกิดข้อผิดพลาด: ${err.message || "Update failed"}`);
+            } finally {
+                setIsUpdating(false);
+            }
+            return;
+        }
+
+        // Fallback XHR อัปโหลดตรงหากไม่มี onFirmwareUpdate ส่งมา
+        const formData = new FormData();
+        formData.append("file", selectedFile);
+        formData.append("deviceIp", deviceIp);
+        if (otaPassword) {
+            formData.append("password", otaPassword);
+        }
+
+        const xhr = new XMLHttpRequest();
+        const backendBase = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
+        const backendUrl = `${backendBase}/api/esphome/update`;
+
+        xhr.upload.onprogress = (event) => {
+            if (event.lengthComputable) {
+                const percentCompleted = Math.min(100, Math.round((event.loaded * 100) / event.total));
+                setUpdateProgress(percentCompleted);
+
+                if (percentCompleted < 100) {
+                    setStatusMessage(`[1/3] กำลังอัปโหลดไฟล์ไปยัง Server (${percentCompleted}%)`);
+                } else {
+                    setFlashStage("flashing");
+                    setStatusMessage(`[2/3] Server กำลังเขียน Firmware ลง ESP32 (${deviceIp})... ห้ามปิดหน้านี้`);
+                }
+            }
+        };
+
+        xhr.onload = () => {
+            setIsUpdating(false);
+            if (xhr.status === 200) {
+                setFlashStage("success");
+                setUpdateProgress(100);
+                setStatusMessage(`[3/3] ✅ อัปเดต Firmware ลง ESP32 (${deviceIp}) สำเร็จแล้ว! อุปกรณ์กำลัง Reboot...`);
+            } else {
+                setFlashStage("error");
+                try {
+                    const res = JSON.parse(xhr.responseText);
+                    setStatusMessage(`❌ เกิดข้อผิดพลาด: ${res.error || res.details || xhr.statusText}`);
+                } catch {
+                    setStatusMessage(`❌ เกิดข้อผิดพลาดจาก Server (Status: ${xhr.status})`);
+                }
+            }
+        };
+
+        xhr.onerror = () => {
+            setIsUpdating(false);
+            setFlashStage("error");
+            setStatusMessage("❌ ไม่สามารถเชื่อมต่อกับ Backend Server ได้");
+        };
+
+        xhr.open("POST", backendUrl, true);
+        xhr.send(formData);
+    };
 
     return (
         <div className="rounded-3xl bg-[var(--card)] p-5 shadow-sm ring-1 ring-[var(--border)] md:p-6">
@@ -69,12 +196,15 @@ export function SystemHero({
                     <div className="flex items-center gap-2">
                         <h1 className="text-lg font-bold text-[var(--foreground)]">{deviceLabel}</h1>
                         <span
-                            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${isOnline ? "bg-emerald-500/10 text-emerald-500" : "bg-rose-500/10 text-rose-500"
-                                }`}
+                            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
+                                isOnline ? "bg-emerald-500/10 text-emerald-500" : "bg-rose-500/10 text-rose-500"
+                            }`}
                         >
                             <span className={`size-1.5 rounded-full ${isOnline ? "bg-emerald-500" : "bg-rose-500"}`} />
                             {isOnline ? "Online" : "Offline"}
                         </span>
+
+                        {/* Action Buttons */}
                         {onRefresh && (
                             <button
                                 type="button"
@@ -85,6 +215,7 @@ export function SystemHero({
                                 <RefreshCw className="size-4 transition-transform duration-500 group-hover:rotate-180" />
                             </button>
                         )}
+
                         {onOpenAlarms && (
                             <button
                                 type="button"
@@ -104,17 +235,26 @@ export function SystemHero({
                                 )}
                             </button>
                         )}
+
+                        {/* ปุ่ม Firmware Update */}
+                        <button
+                            type="button"
+                            onClick={() => setIsFwModalOpen(true)}
+                            title="Firmware Update"
+                            className="group inline-flex size-8 cursor-pointer items-center justify-center rounded-xl bg-[var(--muted)] text-[var(--muted-foreground)] ring-1 ring-[var(--border)] transition-all duration-150 hover:bg-[var(--foreground)] hover:text-[var(--card)] hover:shadow-md active:scale-95"
+                        >
+                            <Cpu className="size-4 transition-transform duration-300 group-hover:scale-110" />
+                        </button>
                     </div>
+
                     <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">
                         {deviceMac && <span className="font-mono">{deviceMac} · </span>}
-                        {batteryType} · {cellCount}S · Max Balancer {maxBalancerCurrentA}A
+                        {batteryType} · {cellCount}S · Max Balancer {maxBalancerCurrentA}A · <span className="font-semibold text-[var(--foreground)]">FW {firmwareVersion}</span>
                     </p>
                 </div>
 
                 {/* Status Switches Indicators */}
                 <div className="flex items-center gap-2">
-                    {/* Charge Status - driven by charging_state (via chargeMOS,
-                        see useBmsPackLive.js), per explicit instruction. */}
                     <span className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold ${chargeMOS ? "bg-emerald-500/10 text-emerald-500" : "bg-zinc-500/10 text-zinc-400"}`}>
                         <Zap className="size-3.5" />
                         <span>
@@ -123,13 +263,11 @@ export function SystemHero({
                         </span>
                     </span>
 
-                    {/* Discharge Status */}
                     <span className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold ${dischargeMOS ? "bg-emerald-500/10 text-emerald-500" : "bg-zinc-500/10 text-zinc-400"}`}>
                         <Power className="size-3.5" />
                         <span>Discharge {dischargeMOS ? "ON" : "OFF"}</span>
                     </span>
 
-                    {/* Balance Status */}
                     <span className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold ${balancerOn ? "bg-blue-500/10 text-blue-500" : "bg-zinc-500/10 text-zinc-400"}`}>
                         <RefreshCw className={`size-3.5 ${balancerOn ? "animate-spin" : ""}`} />
                         <span>Balance {balancerOn ? "ON" : "OFF"}</span>
@@ -139,10 +277,7 @@ export function SystemHero({
 
             {/* Main Grid Section */}
             <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-
-                {/* ========================================================= */}
-                {/* กล่อง 1: SOC + SOH                                        */}
-                {/* ========================================================= */}
+                {/* SOC & SOH */}
                 <div className="flex flex-col justify-between rounded-2xl bg-[var(--card)] p-4 ring-1 ring-[var(--border)]">
                     <div className="flex items-center justify-between">
                         <span className="text-xs font-semibold text-[var(--muted-foreground)]">State of Charge (SOC)</span>
@@ -152,10 +287,7 @@ export function SystemHero({
                     </div>
 
                     <div className="my-2 flex items-center justify-center gap-3">
-                        <ElectricGauge
-                            socPercent={socPercent}
-                            isCharging={isCharging}
-                        />
+                        <ElectricGauge socPercent={socPercent} isCharging={isCharging} />
                         <div className="flex flex-col justify-center">
                             <div className="text-2xl font-extrabold text-[var(--foreground)] tabular-nums">
                                 {socPercent.toFixed(1)}%
@@ -173,8 +305,9 @@ export function SystemHero({
                         </div>
                         <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--border)]">
                             <div
-                                className={`h-full rounded-full transition-all duration-500 ${soh >= 80 ? "bg-emerald-500" : soh >= 50 ? "bg-amber-500" : "bg-rose-500"
-                                    }`}
+                                className={`h-full rounded-full transition-all duration-500 ${
+                                    soh >= 80 ? "bg-emerald-500" : soh >= 50 ? "bg-amber-500" : "bg-rose-500"
+                                }`}
                                 style={{ width: `${Math.min(Math.max(soh, 0), 100)}%` }}
                             />
                         </div>
@@ -198,125 +331,178 @@ export function SystemHero({
                     )}
                 </div>
 
-                {/* ========================================================= */}
-                {/* กล่อง 2: Pack Voltage & Current                           */}
-                {/* ========================================================= */}
-                <div className="flex flex-col justify-between rounded-2xl bg-[var(--card)] p-4 ring-1 ring-[var(--border)]">
-                    <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold text-[var(--muted-foreground)]">Pack Voltage & Current</span>
-                        <span className="rounded-lg bg-[var(--card)] p-1 text-[var(--muted-foreground)] shadow-xs ring-1 ring-[var(--border)]">
-                            <Activity className="size-3.5" />
-                        </span>
-                    </div>
+               {/* Pack Voltage & Current Card */}
+                    <div className="flex flex-col justify-between rounded-2xl bg-[var(--card)] p-4 ring-1 ring-[var(--border)] shadow-xs">
+                        {/* Inline Keyframes สำหรับ Energy Flow Animation */}
+                        <style>{`
+                            @keyframes energyFlowIn {
+                                0% { background-position: 200% 0; }
+                                100% { background-position: -200% 0; }
+                            }
+                            @keyframes energyFlowOut {
+                                0% { background-position: -200% 0; }
+                                100% { background-position: 200% 0; }
+                            }
+                        `}</style>
 
-                    <div className="my-2.5 space-y-2">
-                        <div className="flex items-center justify-between rounded-xl bg-[var(--card)] p-2.5 shadow-xs ring-1 ring-[var(--border)]/60">
-                            <div className="flex items-center gap-2.5">
-                                <div className="flex size-8 items-center justify-center rounded-lg bg-amber-500/10 text-amber-500">
-                                    <Zap className="size-4" />
-                                </div>
-                                <div>
-                                    <div className="text-[10px] font-medium text-[var(--muted-foreground)]">Voltage</div>
-                                    <div className="text-lg font-extrabold text-[var(--foreground)] tabular-nums leading-none">
-                                        {packVoltage.toFixed(2)} <span className="text-xs font-semibold text-[var(--muted-foreground)]">V</span>
-                                    </div>
-                                </div>
-                            </div>
-                            <span className="rounded-md bg-[var(--muted)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--muted-foreground)]">
-                                {cellCount ? `${(cellCount * 3.2).toFixed(0)}V Sys` : "System"}
+                        {/* Header */}
+                        <div className="flex items-center justify-between">
+                            <span className="text-xs font-semibold text-[var(--muted-foreground)]">Pack Voltage & Current</span>
+                            <span className="rounded-lg bg-[var(--card)] p-1 text-[var(--muted-foreground)] shadow-xs ring-1 ring-[var(--border)]">
+                                <Activity className="size-3.5" />
                             </span>
                         </div>
 
-                        <div className="relative flex items-center justify-between overflow-hidden rounded-xl bg-[var(--card)] p-2.5 shadow-xs ring-1 ring-[var(--border)]/60">
-                            {/* Flowing current animation - a soft stripe that drifts across the
-                                card, direction/color/speed tied to real current: right-to-left
-                                while charging, left-to-right while discharging, still when idle. */}
-                            {current !== 0 && (
-                                <div
-                                    className={`pointer-events-none absolute inset-0 opacity-40 ${current > 0 ? "animate-[flow-left_1.4s_linear_infinite]" : "animate-[flow-right_1.4s_linear_infinite]"
+                        {/* Main Content Area (เรียงแนวตั้งตามเดิม) */}
+                        <div className="my-2.5 space-y-2">
+                            {/* Voltage Box - ปรับขอบใหม่เป็น Neutral Border */}
+                            <div className="flex items-center justify-between rounded-xl bg-[var(--card)] p-2.5 shadow-xs ring-1 ring-[var(--border)]/60">
+                                <div className="flex items-center gap-2.5">
+                                    <div className="flex size-8 items-center justify-center rounded-lg bg-amber-500/10 text-amber-500">
+                                        <Zap className="size-4" />
+                                    </div>
+                                    <div>
+                                        <div className="text-[10px] font-medium text-[var(--muted-foreground)]">Voltage</div>
+                                        <div className="text-lg font-extrabold tabular-nums leading-none text-[var(--foreground)]">
+                                            {packVoltage.toFixed(2)} <span className="text-xs font-semibold text-[var(--muted-foreground)]">V</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <span className="rounded-md bg-[var(--muted)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--muted-foreground)]">
+                                    {cellCount ? `${(cellCount * 3.2).toFixed(0)}V Sys` : "System"}
+                                </span>
+                            </div>
+
+                              
+                            {/* Current Box - เพิ่มขนาดไอคอน + เปลี่ยนเป็นไอคอนหลอดไฟ (Lightbulb) */}
+                            <div 
+                                className={`relative flex items-center justify-between overflow-hidden rounded-xl bg-[var(--card)] p-2.5 shadow-xs ring-1 transition-colors ${
+                                    current > 0
+                                        ? "ring-emerald-500/30"
+                                        : current < 0
+                                        ? "ring-amber-500/30"
+                                        : "ring-[var(--border)]/60"
+                                }`}
+                            >
+                                {/* Background Energy Flow Layer */}
+                                {current !== 0 && (
+                                    <div
+                                        className="pointer-events-none absolute inset-0 opacity-40"
+                                        style={{
+                                            backgroundImage: `linear-gradient(${
+                                                current > 0 ? "270deg" : "90deg"
+                                            }, transparent 0%, ${
+                                                current > 0 ? "rgba(16,185,129,0.5)" : "rgba(245,158,11,0.5)"
+                                            } 50%, transparent 100%)`,
+                                            backgroundSize: "200% 100%",
+                                            animation: current > 0 
+                                                ? "energyFlowOut 1.5s linear infinite"  /* ขวา -> ซ้าย เข้าแบต */
+                                                : "energyFlowIn 1.5s linear infinite",  /* ซ้าย -> ขวา ออกไปหลอดไฟ */
+                                        }}
+                                    />
+                                )}
+
+                                {/* ฝั่งซ้าย: ไอคอนแบตเตอรี่ (ใหญ่ขึ้น) + ค่า Current */}
+                                <div className="relative flex items-center gap-2.5">
+                                    <div
+                                        className={`relative flex size-9 items-center justify-center rounded-lg ${
+                                            current > 0 
+                                                ? "bg-emerald-500/10 text-emerald-500" 
+                                                : current < 0 
+                                                ? "bg-amber-500/10 text-amber-500" 
+                                                : "bg-zinc-500/10 text-zinc-400"
                                         }`}
-                                    style={{
-                                        backgroundImage: `repeating-linear-gradient(90deg, transparent 0px, transparent 10px, ${current > 0 ? "rgba(16,185,129,0.35)" : "rgba(245,158,11,0.35)"
-                                            } 10px, transparent 22px)`,
-                                        backgroundSize: "44px 100%",
-                                    }}
-                                />
-                            )}
-                            <div className="relative flex items-center gap-2.5">
-                                <div className={`relative flex size-8 items-center justify-center rounded-lg ${current > 0 ? "bg-emerald-500/10 text-emerald-500" : current < 0 ? "bg-amber-500/10 text-amber-500" : "bg-zinc-500/10 text-zinc-400"
-                                    }`}>
-                                    {current !== 0 && (
-                                        <span className={`absolute inline-flex size-full animate-ping rounded-lg opacity-40 ${current > 0 ? "bg-emerald-400" : "bg-amber-400"}`} />
-                                    )}
-                                    <Activity className="relative size-4" />
-                                </div>
-                                <div>
-                                    <div className="text-[10px] font-medium text-[var(--muted-foreground)]">Current</div>
-                                    <div className={`text-lg font-extrabold tabular-nums leading-none ${current > 0 ? "text-emerald-500" : current < 0 ? "text-amber-500" : "text-[var(--foreground)]"
-                                        }`}>
-                                        {current > 0 ? `+${current.toFixed(2)}` : current.toFixed(2)} <span className="text-xs font-semibold text-[var(--muted-foreground)]">A</span>
+                                    >
+                                        {current !== 0 && (
+                                            <span className={`absolute inline-flex size-full animate-ping rounded-lg opacity-30 ${
+                                                current > 0 ? "bg-emerald-400" : "bg-amber-400"
+                                            }`} />
+                                        )}
+                                        
+                                        {/* ขยายไอคอนแบตเตอรี่เป็น size-5 */}
+                                        {current > 0 ? (
+                                            <BatteryCharging className="relative size-5" />
+                                        ) : (
+                                            <Battery className="relative size-5" />
+                                        )}
+                                    </div>
+
+                                    <div>
+                                        <div className="text-[10px] font-medium text-[var(--muted-foreground)]">Current</div>
+                                        <div
+                                            className={`text-lg font-extrabold tabular-nums leading-none ${
+                                                current > 0 ? "text-emerald-500" : current < 0 ? "text-amber-500" : "text-[var(--foreground)]"
+                                            }`}
+                                        >
+                                            {current > 0 ? `+${current.toFixed(2)}` : current.toFixed(2)}{" "}
+                                            <span className="text-xs font-semibold text-[var(--muted-foreground)]">A</span>
+                                        </div>
                                     </div>
                                 </div>
+
+                                {/* ฝั่งขวา: ข้อความสถานะ + ไอคอนเครื่องชาร์จ / หลอดไฟ (ใหญ่ขึ้น) */}
+                                <div className="relative flex items-center gap-2">
+                                    <span
+                                        className={`rounded-md px-2 py-0.5 text-[10px] font-bold ${
+                                            current > 0
+                                                ? "bg-emerald-500/10 text-emerald-500"
+                                                : current < 0
+                                                ? "bg-amber-500/10 text-amber-500"
+                                                : "bg-zinc-500/10 text-zinc-400"
+                                        }`}
+                                    >
+                                        {current > 0 ? "Charging(กำลังชาร์จ)" : current < 0 ? "Discharging(จ่ายกระแส)" : "Idle"}
+                                    </span>
+
+                                    {/* เครื่องชาร์จ (ขยายเป็น size-8 / icon size-4.5) */}
+                                    {current > 0 && (
+                                        <div className="flex size-8 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-500" title="Charger">
+                                            <PlugZap className="size-4.5" />
+                                        </div>
+                                    )}
+
+                                    {/* หลอดไฟ (ขยายเป็น size-8 / icon size-4.5) */}
+                                    {current < 0 && (
+                                        <div className="flex size-8 items-center justify-center rounded-lg bg-amber-500/10 text-amber-500" title="Load (Lightbulb)">
+                                            <Lightbulb className="size-4.5" />
+                                        </div>
+                                    )}
+                                </div>
                             </div>
-                            <span className={`relative rounded-md px-2 py-0.5 text-[10px] font-bold ${current > 0
-                                ? "bg-emerald-500/10 text-emerald-500"
-                                : current < 0
-                                    ? "bg-amber-500/10 text-amber-500"
-                                    : "bg-zinc-500/10 text-zinc-400"
-                                }`}>
-                                {current > 0 ? "Charging" : current < 0 ? "Discharging" : "Idle"}
+                        </div>
+
+                        {/* Details Section (แนวตั้งเหมือนเดิม) */}
+                        <div className="flex items-center justify-between border-t border-[var(--border)]/80 pt-2.5 text-xs text-[var(--muted-foreground)]">
+                            <span>Average Cell</span>
+                            <span className="font-bold tabular-nums text-[var(--foreground)]">
+                                {cellAvgVoltage.toFixed(3)} <span className="text-[10px] font-normal text-[var(--muted-foreground)]">V</span>
+                            </span>
+                        </div>
+
+                        <div className="mt-1.5 flex items-center justify-between text-xs text-[var(--muted-foreground)]">
+                            <span>Diff Volt (ΔV)</span>
+                            <span
+                                className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${
+                                    voltDiffMv <= 15
+                                        ? "bg-emerald-500/10 text-emerald-500"
+                                        : voltDiffMv <= 30
+                                        ? "bg-amber-500/10 text-amber-500"
+                                        : "bg-rose-500/10 text-rose-500"
+                                }`}
+                            >
+                                {voltDiffMv} mV
+                            </span>
+                        </div>
+
+                        <div className="mt-1.5 flex items-center justify-between text-xs text-[var(--muted-foreground)]">
+                            <span>Bal Current</span>
+                            <span className="font-bold tabular-nums text-[var(--foreground)]">
+                                {balancerCurrentA.toFixed(2)} <span className="text-[10px] font-normal text-[var(--muted-foreground)]">A</span>
                             </span>
                         </div>
                     </div>
-                    <style>{`
-                        @keyframes flow-left {
-                            from { background-position: 44px 0; }
-                            to { background-position: 0 0; }
-                        }
-                        @keyframes flow-right {
-                            from { background-position: 0 0; }
-                            to { background-position: 44px 0; }
-                        }
-                        @keyframes wiggle {
-                            0%, 100% { transform: rotate(0deg); }
-                            20% { transform: rotate(-12deg); }
-                            40% { transform: rotate(10deg); }
-                            60% { transform: rotate(-6deg); }
-                            80% { transform: rotate(4deg); }
-                        }
-                    `}</style>
 
-                    <div className="flex items-center justify-between border-t border-[var(--border)]/80 pt-2.5 text-xs text-[var(--muted-foreground)]">
-                        <span>Average Cell</span>
-                        <span className="font-bold text-[var(--foreground)] tabular-nums">
-                            {cellAvgVoltage.toFixed(3)} <span className="text-[10px] font-normal text-[var(--muted-foreground)]">V</span>
-                        </span>
-                    </div>
-
-                    <div className="mt-1.5 flex items-center justify-between text-xs text-[var(--muted-foreground)]">
-                        <span>Diff Volt (ΔV)</span>
-                        <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${
-                            voltDiffMv <= 15
-                                ? "bg-emerald-500/10 text-emerald-500"
-                                : voltDiffMv <= 30
-                                    ? "bg-amber-500/10 text-amber-500"
-                                    : "bg-rose-500/10 text-rose-500"
-                        }`}>
-                            {voltDiffMv} mV
-                        </span>
-                    </div>
-
-                    <div className="mt-1.5 flex items-center justify-between text-xs text-[var(--muted-foreground)]">
-                        <span>Bal Current</span>
-                        <span className="font-bold text-[var(--foreground)] tabular-nums">
-                            {balancerCurrentA.toFixed(2)} <span className="text-[10px] font-normal text-[var(--muted-foreground)]">A</span>
-                        </span>
-                    </div>
-                </div>
-
-                {/* ========================================================= */}
-                {/* กล่อง 3: Power Output (เพิ่มสเกลตัวเลขรอบเกจ)            */}
-                {/* ========================================================= */}
+                {/* Power Output */}
                 <div className="flex flex-col justify-between rounded-2xl bg-[var(--card)] p-4 ring-1 ring-[var(--border)]">
                     <div className="flex items-center justify-between">
                         <span className="text-xs font-semibold text-[var(--muted-foreground)]">Power</span>
@@ -327,9 +513,6 @@ export function SystemHero({
 
                     <div className="my-1 flex flex-col items-center justify-center">
                         <div className="relative flex items-center justify-center">
-                            {/* Ambient glow - pulses behind the dial whenever power is
-                                actually flowing, colored by direction. Pure flair layer,
-                                doesn't touch the real gauge math below it. */}
                             {power !== 0 && (
                                 <div
                                     className="pointer-events-none absolute size-40 animate-pulse rounded-full blur-2xl"
@@ -337,9 +520,7 @@ export function SystemHero({
                                 />
                             )}
                             <svg className="relative size-48" viewBox="0 0 110 110">
-                                {/* วงโค้งเกจวัดพลังงาน (หมุน -210 deg รอบจุดศูนย์กลาง 55, 55) */}
                                 <g transform="rotate(-210 55 55)">
-                                    {/* แถบพื้นหลัง (Background Track) */}
                                     <circle
                                         cx="55"
                                         cy="55"
@@ -351,7 +532,6 @@ export function SystemHero({
                                         strokeDasharray="155 235"
                                         strokeLinecap="round"
                                     />
-                                    {/* แถบระดับพลังงาน (Dynamic Power Arc) */}
                                     <circle
                                         cx="55"
                                         cy="55"
@@ -367,10 +547,6 @@ export function SystemHero({
                                 </g>
 
                                 <defs>
-                                    {/* Charging = green, discharging = orange - matches the
-                                        charge/discharge color convention used everywhere else
-                                        in the dashboard (Pack Voltage & Current, Charge/Discharge
-                                        chart, etc), driven by the real current sign. */}
                                     <linearGradient id="powerGaugeGradient" x1="0%" y1="0%" x2="100%" y2="100%">
                                         {current > 0 ? (
                                             <>
@@ -391,9 +567,6 @@ export function SystemHero({
                                     </linearGradient>
                                 </defs>
 
-                                {/* Glowing tip dot - rides the exact end of the power arc, a
-                                    little "comet head" so the live level reads at a glance
-                                    even before the eye finds the arc's color gradient. */}
                                 {power !== 0 &&
                                     (() => {
                                         const frac = Math.min(Math.abs(power), 6000) / 6000;
@@ -408,7 +581,6 @@ export function SystemHero({
                                         );
                                     })()}
 
-                                {/* สเกลตัวเลข + ขีดบอกระดับรอบเกจ (Gauge Scale Ticks & Labels) */}
                                 {[
                                     { val: "0", angle: 150, showLabel: true },
                                     { val: "1k", angle: 190, showLabel: true },
@@ -419,9 +591,9 @@ export function SystemHero({
                                     { val: "6k", angle: 30, showLabel: true },
                                 ].map(({ val, angle, showLabel }) => {
                                     const rad = (angle * Math.PI) / 180;
-                                    const r1 = 41; // จุดเริ่มต้นขีดสเกล
-                                    const r2 = showLabel ? 44.5 : 43; // ความยาวขีดสเกล
-                                    const rText = 50; // ระยะรัศมีวางตัวเลข
+                                    const r1 = 41;
+                                    const r2 = showLabel ? 44.5 : 43;
+                                    const rText = 50;
 
                                     const x1 = 55 + r1 * Math.cos(rad);
                                     const y1 = 55 + r1 * Math.sin(rad);
@@ -432,7 +604,6 @@ export function SystemHero({
 
                                     return (
                                         <g key={angle}>
-                                            {/* ขีดสเกล */}
                                             <line
                                                 x1={x1}
                                                 y1={y1}
@@ -442,7 +613,6 @@ export function SystemHero({
                                                 strokeWidth={showLabel ? "1" : "0.6"}
                                                 className={showLabel ? "text-[var(--muted-foreground)]" : "text-[var(--border)]"}
                                             />
-                                            {/* ตัวเลขสเกล */}
                                             {showLabel && (
                                                 <text
                                                     x={xT}
@@ -459,38 +629,36 @@ export function SystemHero({
                                 })}
                             </svg>
 
-                            {/* เนื้อหาตรงกลางเกจ: Watt + Amp */}
                             <div className="absolute flex flex-col items-center justify-center text-center">
                                 <span className="text-2xl font-black leading-none text-[var(--foreground)] tabular-nums">
                                     {Math.abs(power).toFixed(0)}
                                 </span>
                                 <span className="mt-0.5 text-[10px] font-bold tracking-wider text-[var(--muted-foreground)]">WATT</span>
-                                
-                                {/* Badge แสดงค่า Amp */}
-                                <span className={`mt-1.5 rounded-md px-2 py-0.5 text-xs font-bold tabular-nums shadow-xs ring-1 ring-[var(--border)]/60 ${
-                                    current > 0 
-                                        ? "bg-emerald-500/10 text-emerald-500" 
-                                        : current < 0 
-                                            ? "bg-amber-500/10 text-amber-500" 
+
+                                <span
+                                    className={`mt-1.5 rounded-md px-2 py-0.5 text-xs font-bold tabular-nums shadow-xs ring-1 ring-[var(--border)]/60 ${
+                                        current > 0
+                                            ? "bg-emerald-500/10 text-emerald-500"
+                                            : current < 0
+                                            ? "bg-amber-500/10 text-amber-500"
                                             : "bg-[var(--card)] text-[var(--muted-foreground)]"
-                                }`}>
+                                    }`}
+                                >
                                     {current > 0 ? `+${current.toFixed(1)}` : current.toFixed(1)} A
                                 </span>
                             </div>
                         </div>
 
-                        {/* Status Badge - driven by the real current sign, not the
-                            charge/discharge MOSFET enable switches (`status` prop):
-                            a pack can have discharge ON while actually sitting idle,
-                            or be mid-discharge while still MOSFET-labeled otherwise -
-                            this badge should say what's actually happening right now. */}
-                        <div className="-mt-3 inline-flex items-center gap-1.5 rounded-full bg-[var(--card)] px-3.5 py-1 text-xs font-semibold shadow-xs ring-1 ring-[var(--border)]">
-                            <span className={`size-2 rounded-full ${current > 0
-                                ? "bg-emerald-500 animate-pulse"
-                                : current < 0
-                                    ? "bg-amber-500 animate-pulse"
-                                    : "bg-zinc-400"
-                                }`} />
+                        <div className="-mt-3 inline-flex items-center gap-1.5 rounded-full bg-[var(--card)] text-[var(--muted-foreground)]  text-emerald-500 px-3.5 py-1 text-xs font-semibold shadow-xs ring-1 ring-[var(--border)]">
+                            <span
+                                className={`size-2 rounded-full ${
+                                    current > 0
+                                        ? "bg-emerald-500 animate-pulse"
+                                        : current < 0
+                                        ? "bg-amber-500 animate-pulse"
+                                        : "bg-zinc-400"
+                                }`}
+                            />
                             <span>{current > 0 ? "Charging" : current < 0 ? "Discharging" : "Idle"}</span>
                         </div>
                     </div>
@@ -500,8 +668,193 @@ export function SystemHero({
                         <span className="font-bold text-[var(--foreground)] tabular-nums">6,000 W</span>
                     </div>
                 </div>
-
             </div>
+
+            {/* Firmware Update Modal Popup */}
+            {isFwModalOpen && (
+                <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs animate-in fade-in duration-200">
+                    <div className="relative w-full max-w-md rounded-3xl bg-[var(--card)] p-6 shadow-2xl ring-1 ring-[var(--border)]">
+                        {/* Modal Header */}
+                        <div className="flex items-center justify-between border-b border-[var(--border)] pb-3">
+                            <div className="flex items-center gap-2.5">
+                                <div className="flex size-9 items-center justify-center rounded-xl bg-[var(--muted)] text-[var(--foreground)]">
+                                    <Cpu className="size-5" />
+                                </div>
+                                <div>
+                                    <h3 className="text-base font-bold text-[var(--foreground)]">Firmware Update</h3>
+                                    <p className="text-xs text-[var(--muted-foreground)]">Current Version: {firmwareVersion || "v1.0.0"}</p>
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                disabled={isUpdating}
+                                onClick={() => setIsFwModalOpen(false)}
+                                className="rounded-xl p-1.5 text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)] transition-colors disabled:opacity-50"
+                            >
+                                <X className="size-5" />
+                            </button>
+                        </div>
+
+                        {/* Modal Form Content */}
+                        <form onSubmit={handleStartUpdate} className="mt-4 space-y-3.5">
+                            {/* Device Target IP */}
+                            <div>
+                                <label className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-[var(--foreground)]">
+                                    <Server className="size-3.5 text-[var(--muted-foreground)]" />
+                                    Target Device IP:
+                                </label>
+                                <input
+                                    type="text"
+                                    value={deviceIp}
+                                    onChange={(e) => setDeviceIp(e.target.value)}
+                                    placeholder="เช่น 192.168.1.4"
+                                    disabled={isUpdating}
+                                    className="w-full rounded-xl bg-[var(--card)] px-3 py-2 text-xs font-mono text-[var(--foreground)] ring-1 ring-[var(--border)] focus:outline-hidden focus:ring-2 focus:ring-sky-500 disabled:opacity-50"
+                                />
+                            </div>
+
+                            {/* OTA Password */}
+                            <div>
+                                <label className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-[var(--foreground)]">
+                                    <KeyRound className="size-3.5 text-[var(--muted-foreground)]" />
+                                    OTA Password (Optional):
+                                </label>
+                                <input
+                                    type="password"
+                                    value={otaPassword}
+                                    onChange={(e) => setOtaPassword(e.target.value)}
+                                    placeholder="ใส่รหัสผ่าน OTA หากมี"
+                                    disabled={isUpdating}
+                                    className="w-full rounded-xl bg-[var(--card)] px-3 py-2 text-xs text-[var(--foreground)] ring-1 ring-[var(--border)] focus:outline-hidden focus:ring-2 focus:ring-sky-500 disabled:opacity-50"
+                                />
+                            </div>
+
+                            {/* File Upload Box */}
+                            <div>
+                                <label className="mb-1 block text-xs font-semibold text-[var(--foreground)]">
+                                    Select Firmware (.bin):
+                                </label>
+                                <div className="rounded-2xl border border-dashed border-[var(--border)] bg-[var(--muted)]/30 p-4 text-center hover:bg-[var(--muted)]/50 transition-colors">
+                                    <Upload className="mx-auto size-7 text-[var(--muted-foreground)] mb-1.5" />
+                                    <label className="block cursor-pointer">
+                                        <span className="text-xs font-semibold text-sky-500 hover:underline">
+                                            Click to select binary file (.bin)
+                                        </span>
+                                        <input
+                                            type="file"
+                                            accept=".bin"
+                                            disabled={isUpdating}
+                                            onChange={handleFileChange}
+                                            className="hidden"
+                                        />
+                                    </label>
+                                    {selectedFile ? (
+                                        <p className="mt-2 text-xs font-mono font-medium text-[var(--foreground)] bg-[var(--card)] py-1 px-2.5 rounded-lg inline-block ring-1 ring-[var(--border)] truncate max-w-[280px]">
+                                            {selectedFile.name} ({Math.round(selectedFile.size / 1024)} KB)
+                                        </p>
+                                    ) : (
+                                        <p className="mt-1 text-[11px] text-[var(--muted-foreground)]">
+                                            Select ESPHome / ESP32 compiled firmware binary file
+                                        </p>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Warning Alert */}
+                            <div className="flex items-start gap-2 rounded-xl bg-amber-500/10 p-2.5 text-amber-500 text-xs">
+                                <AlertTriangle className="size-4 shrink-0 mt-0.5" />
+                                <span>Do not power off device or disconnect network during firmware update.</span>
+                            </div>
+
+                            {/* Progress & Stage Status Box */}
+                            {(isUpdating || flashStage !== "idle") && (
+                                <div className="space-y-2 rounded-2xl bg-[var(--muted)]/30 p-3 ring-1 ring-[var(--border)]">
+                                    <div className="flex items-center justify-between text-xs font-semibold">
+                                        <span
+                                            className={
+                                                flashStage === "flashing"
+                                                    ? "text-amber-500"
+                                                    : flashStage === "success"
+                                                    ? "text-emerald-500"
+                                                    : flashStage === "error"
+                                                    ? "text-rose-500"
+                                                    : "text-sky-500"
+                                            }
+                                        >
+                                            {flashStage === "flashing" ? "⚡ Flashing..." : `${updateProgress}%`}
+                                        </span>
+                                        <span className="font-mono text-[11px] text-[var(--muted-foreground)]">
+                                            Target: {deviceIp}
+                                        </span>
+                                    </div>
+
+                                    {/* Bar Track */}
+                                    <div className="h-2 w-full overflow-hidden rounded-full bg-[var(--border)]">
+                                        <div
+                                            className={`h-full transition-all duration-300 ${
+                                                flashStage === "flashing"
+                                                    ? "bg-amber-500 animate-pulse"
+                                                    : flashStage === "success"
+                                                    ? "bg-emerald-500"
+                                                    : flashStage === "error"
+                                                    ? "bg-rose-500"
+                                                    : "bg-sky-500"
+                                            }`}
+                                            style={{ width: flashStage === "flashing" ? "100%" : `${updateProgress}%` }}
+                                        />
+                                    </div>
+
+                                    {/* Status Description Message */}
+                                    {statusMessage && (
+                                        <p
+                                            className={`mt-2 rounded-lg p-2 text-center text-[11px] font-medium ring-1 ${
+                                                flashStage === "success"
+                                                    ? "bg-emerald-500/10 text-emerald-500 ring-emerald-500/20"
+                                                    : flashStage === "error"
+                                                    ? "bg-rose-500/10 text-rose-500 ring-rose-500/20"
+                                                    : flashStage === "flashing"
+                                                    ? "bg-amber-500/10 text-amber-500 ring-amber-500/20"
+                                                    : "bg-[var(--card)] text-[var(--foreground)] ring-[var(--border)]"
+                                            }`}
+                                        >
+                                            {statusMessage}
+                                        </p>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Modal Footer Actions */}
+                            <div className="mt-4 flex items-center justify-end gap-2.5 border-t border-[var(--border)] pt-3.5">
+                                <button
+                                    type="button"
+                                    disabled={isUpdating}
+                                    onClick={() => setIsFwModalOpen(false)}
+                                    className="rounded-xl px-4 py-2 text-xs font-semibold text-[var(--muted-foreground)] hover:bg-[var(--muted)] transition-colors disabled:opacity-50"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={!selectedFile || isUpdating}
+                                    className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--foreground)] px-4 py-2 text-xs font-semibold text-[var(--card)] hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+                                >
+                                    {isUpdating ? (
+                                        <>
+                                            <RefreshCw className="size-3.5 animate-spin" />
+                                            <span>{flashStage === "flashing" ? "Flashing..." : "Uploading..."}</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <CheckCircle2 className="size-3.5" />
+                                            <span>Start Update</span>
+                                        </>
+                                    )}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
