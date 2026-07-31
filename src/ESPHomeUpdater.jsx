@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { API_BASE_URL } from './lib/apiClient.js';
 
 const PRESET_DEVICES = [
   { name: 'ESP32 - Living Room', ip: '192.168.1.4' },
@@ -52,8 +53,12 @@ export default function ESPHomeUpdater() {
     startTimeRef.current = Date.now();
 
     const xhr = new XMLHttpRequest();
-    const backendBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
-    const backendUrl = `${backendBase}/api/esphome/update`;
+    // Same-origin in production (apiClient.js's API_BASE_URL) instead of a
+    // hardcoded localhost:4000 fallback - that fallback fired even on the
+    // deployed site (jksmartbms-1.onrender.com), sending the browser off to
+    // try reaching the visitor's own machine on port 4000, which is neither
+    // reachable nor CORS-allowed from that origin.
+    const backendUrl = `${API_BASE_URL}/api/esphome/update`;
 
     // ติดตามการส่งไฟล์จาก เบราว์เซอร์ -> Node.js
     xhr.upload.onprogress = (event) => {
