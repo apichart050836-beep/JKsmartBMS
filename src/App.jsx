@@ -539,16 +539,18 @@ function AuthedApp() {
         </div>
         <div className="flex items-center gap-2">
           <UserMenu user={user} />
-          {activePage !== "dashboard" && (
-            <button
-              type="button"
-              onClick={() => setShowLogoutModal(true)}
-              title="Logout"
-              className="group inline-flex size-8 cursor-pointer items-center justify-center rounded-full bg-[var(--card)] text-[var(--critical)] ring-1 ring-[var(--border)] shadow-sm transition-all duration-200 hover:bg-red-50 hover:ring-red-200 hover:scale-105 active:scale-95"
-            >
-              <LogOut className="size-4 transition-transform duration-300 group-hover:-translate-x-0.5" />
-            </button>
-          )}
+          {/* Moved next to UserMenu and now shown on every page (was
+              hidden on Dashboard before, since BMSDashboard/TopBar.jsx
+              used to render its own separate Logout button + modal there -
+              removed in favor of this single one, per explicit request). */}
+          <button
+            type="button"
+            onClick={() => setShowLogoutModal(true)}
+            title="Logout"
+            className="group inline-flex size-8 cursor-pointer items-center justify-center rounded-full bg-[var(--card)] text-[var(--critical)] ring-1 ring-[var(--border)] shadow-sm transition-all duration-200 hover:bg-red-50 hover:ring-red-200 hover:scale-105 active:scale-95"
+          >
+            <LogOut className="size-4 transition-transform duration-300 group-hover:-translate-x-0.5" />
+          </button>
         </div>
       </div>
 

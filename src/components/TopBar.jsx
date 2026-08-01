@@ -1,5 +1,5 @@
 import React from "react";
-import { Settings, LogOut, Sun, Moon } from "lucide-react"; // เพิ่ม LogOut เข้าไป
+import { Settings, Sun, Moon } from "lucide-react";
 import { useTheme } from "../context/ThemeContext.jsx";
 import { WeatherButton } from "./WeatherButton.jsx";
 
@@ -67,7 +67,6 @@ export function TopBar({
     onSelectBms,
     onOpenWeather,
     onOpenConfig,
-    onLogout, // รับฟังก์ชัน onLogout เข้ามา
     configDisabled = false,
 }) {
     const { theme, toggleTheme } = useTheme();
@@ -98,7 +97,7 @@ export function TopBar({
                     <span>Config</span>
                 </button>
 
-                {/* Dark Mode Toggle (Circular Style, matches Logout) */}
+                {/* Dark Mode Toggle (Circular Style) */}
                 <button
                     type="button"
                     onClick={toggleTheme}
@@ -110,16 +109,6 @@ export function TopBar({
                     ) : (
                         <Moon className="size-5 transition-transform duration-300 group-hover:-rotate-12" />
                     )}
-                </button>
-
-                {/* Logout Button (Circular Style) */}
-                <button
-                    type="button"
-                    onClick={onLogout}
-                    title="Logout"
-                    className="group inline-flex size-10 cursor-pointer items-center justify-center rounded-full bg-[var(--card)] text-[var(--critical)] ring-1 ring-[var(--border)] shadow-sm transition-all duration-200 hover:bg-red-50 hover:ring-red-200 hover:scale-105 active:scale-95"
-                >
-                    <LogOut className="size-[18px] transition-transform duration-300 group-hover:-translate-x-0.5" />
                 </button>
             </div>
         </div>

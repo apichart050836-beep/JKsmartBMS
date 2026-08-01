@@ -18,8 +18,6 @@ import { SettingsPanel } from "./components/SettingsPanel.jsx";
 import { TopBar } from "./components/TopBar.jsx";
 import { Modal } from "./components/Modal.jsx";
 import { api } from "./lib/apiClient.js";
-import { useAuth } from "./context/AuthContext.jsx";
-import { LogoutModal } from "./components/LogoutModal";
 import { computeAlarms } from "./lib/alarms.js";
 import { computeBatteryHealthScore } from "./lib/batteryHealthScore.js";
 import { AlarmList } from "./components/AlarmList.jsx";
@@ -306,7 +304,6 @@ function Pill({ tone = "brand", icon: Icon, children }) {
 // ---------------------------------------------------------------------------
 
 export default function BMSDashboard({ onSoftwareVersionChange }) {
-  const { logout } = useAuth();
   const { hubs } = useHubData();
   const [now, setNow] = useState(new Date());
   const [showWeatherModal, setShowWeatherModal] = useState(false);
@@ -332,7 +329,6 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
   const [showLog, setShowLog] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
   const [showAlarms, setShowAlarms] = useState(false);
-  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
   const [saveError, setSaveError] = useState(null);
   // The only thing that's actually dynamic per render - which devices the
   // backend has reported for this session (already role-filtered
@@ -805,14 +801,8 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
           }}
           onOpenConfig={() => setShowConfig(true)}
           configDisabled={active.isLive && active.adminDisabled}
-          onLogout={() => setIsLogoutModalOpen(true)}
         />
         <AnnouncementBanner />
-        <LogoutModal
-            isOpen={isLogoutModalOpen}
-            onClose={() => setIsLogoutModalOpen(false)}
-            onConfirm={logout}
-        />
         {active.isLive && active.adminDisabled ? (
           <div className="mt-5 flex flex-col items-center justify-center gap-2 rounded-3xl bg-[var(--card)] p-16 text-center shadow-sm ring-1 ring-[var(--border)]">
             <p className="text-lg font-bold text-[var(--foreground)]">ถูกปิดโดย Admin</p>
