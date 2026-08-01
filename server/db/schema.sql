@@ -93,6 +93,23 @@ CREATE TABLE IF NOT EXISTS balancer_switch_intent (
   PRIMARY KEY (hub_id, bms_key)
 );
 
+-- Temporary web-side safety net for a known ESP32 firmware bug (explicit
+-- request, 2026-08-01): until the fixed firmware is actually flashed, the
+-- device can still overwrite settings/my_custom_name with its own raw MAC
+-- address on boot/BLE-reconnect. Unlike charge/balancer, this isn't "the
+-- user's last command" - it's just "the last name we saw that wasn't a MAC
+-- address", refreshed automatically by chargeWatchdog.js every time a real
+-- name is observed, and written back whenever the name reverts to a MAC.
+-- Safe to remove once every board is running the fixed firmware, at which
+-- point the bug this works around can't happen anymore.
+CREATE TABLE IF NOT EXISTS custom_name_intent (
+  hub_id     TEXT NOT NULL,
+  bms_key    TEXT NOT NULL DEFAULT '',
+  name       TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (hub_id, bms_key)
+);
+
 -- Self-service signup requests awaiting admin approval (explicit request,
 -- 2026-08-01): a brand-new email + the correct shared password lands here
 -- instead of immediately getting a Firebase hub - see POST /api/auth/login.

@@ -101,6 +101,54 @@ async function checkSwitch(hubId, bmsKey, data, { settingsKey, intentTable, inte
   await writePath(path, true);
 }
 
+// A device's own reported BLE MAC (bare hex-colon form, e.g.
+// "A4:C1:38:08:24:C5") - the exact shape the ESP32 firmware bug (2026-08-01)
+// falls back to writing into settings/my_custom_name when it doesn't yet
+// know the real name (see the fix already made in the ESPHome yaml, not
+// deployed to every board yet). Checked generically too (any MAC-shaped
+// string), in case info.jk_mac_address itself isn't reported by a given
+// board (confirmed earlier this session - not every device reports it).
+const MAC_SHAPE = /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/;
+
+// Temporary web-side workaround (2026-08-01) for the my_custom_name-reverts-
+// to-MAC-address firmware bug, for boards not yet re-flashed with the real
+// fix. Unlike checkSwitch above, there's no "user's last command" here - a
+// name isn't on/off, so instead this just remembers the last name that
+// *wasn't* MAC-shaped (custom_name_intent) and writes it back the moment the
+// name reverts to one that is. Self-updating: every real name seen refreshes
+// the cache, so it always restores the most recent genuine name, not a
+// stale one. Safe to delete entirely once every board has the real fix.
+async function checkCustomName(hubId, bmsKey, data) {
+  const { settings, info } = data;
+  const deviceLabel = bmsKey ? `${hubId}/${bmsKey}` : hubId;
+  const currentName = settings?.my_custom_name;
+  if (typeof currentName !== "string" || currentName === "") return;
+
+  const knownMac = info?.jk_mac_address;
+  const looksLikeMac = (typeof knownMac === "string" && currentName === knownMac) || MAC_SHAPE.test(currentName);
+
+  const row = db.prepare(`SELECT name FROM custom_name_intent WHERE hub_id = ? AND bms_key = ?`).get(hubId, bmsKey ?? "");
+
+  if (!looksLikeMac) {
+    // A genuine name - cache it as "last known good" if it's new/changed.
+    if (!row || row.name !== currentName) {
+      db.prepare(
+        `INSERT INTO custom_name_intent (hub_id, bms_key, name, updated_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT (hub_id, bms_key) DO UPDATE SET name = excluded.name, updated_at = excluded.updated_at`
+      ).run(hubId, bmsKey ?? "", currentName, Date.now());
+    }
+    return;
+  }
+
+  if (!row || !row.name || row.name === currentName) return; // nothing real to restore
+
+  console.log(`[ChargeWatchdog] ${deviceLabel}: my_custom_name reverted to MAC (${currentName}) - restoring "${row.name}"`);
+  const path = bmsKey
+    ? `JK_BMS_HUB/${hubId}/${bmsKey}/settings/my_custom_name`
+    : `JK_BMS_HUB/${hubId}/settings/my_custom_name`;
+  await writePath(path, row.name);
+}
+
 async function checkDevice(hubId, bmsKey, data) {
   const label = bmsKey ? `${hubId}/${bmsKey}` : hubId;
   const { status } = data;
@@ -131,6 +179,7 @@ async function checkDevice(hubId, bmsKey, data) {
     intentColumn: "desired_balancer",
     label: "Balancer",
   });
+  await checkCustomName(hubId, bmsKey, data);
 }
 
 async function runCycle() {
