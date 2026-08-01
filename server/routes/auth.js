@@ -14,8 +14,10 @@ const router = Router();
 // - Hub owner ('user' role): identity is just "does a hub matching this
 //   email actually exist" - hub_id is derived from the login email (Firebase
 //   keys can't contain ".", see emailToHubId.js) and checked directly
-//   against JK_BMS_HUB, not against the userConf node. Password is the
-//   single shared default (DEFAULT_USER_PASSWORD), not a per-hub value.
+//   against JK_BMS_HUB, not against the userConf node. Once a hub exists,
+//   the email itself is the credential (see /login below) - the shared
+//   default password (DEFAULT_USER_PASSWORD) is only ever checked once,
+//   to queue the original signup request for admin approval.
 async function hubExists(email) {
   const hubId = emailToHubId(email);
   try {
@@ -31,21 +33,36 @@ async function hubExists(email) {
   }
 }
 
-// Step 1 of the login flow: does this Gmail exist at all. Deliberately does
-// NOT reveal anything about the password at this stage.
+// Step 1 of the login flow: does this Gmail exist, and does it still need
+// the access-code step. Deliberately does not otherwise reveal anything
+// about the password at this stage.
+//
+// - Admin: always needsPassword (that's a real per-account hashed password,
+//   this shortcut never applies to it).
+// - 'user', hub already exists (approved) - explicit request (2026-08-01):
+//   email alone is enough from here on, no access code needed on return
+//   visits. needsPassword: false tells the frontend to skip straight to
+//   login instead of showing a password field.
+// - 'user', no hub yet - either never requested, or requested and still
+//   awaiting admin approval (see pending_signups / POST /login below).
+//   Either way the frontend still needs to show the access-code field, so
+//   this looks identical to the caller in both cases - not distinguishing
+//   them here avoids leaking "is this email already mid-approval" to an
+//   unauthenticated caller.
 router.post("/check-email", async (req, res) => {
   const emailRaw = String(req.body?.email || "").trim();
   const email = emailRaw.toLowerCase();
   if (!email) return res.status(400).json({ error: "Email required" });
 
   const adminRow = db.prepare("SELECT id FROM users WHERE lower(email) = ? AND role = 'admin'").get(email);
-  if (adminRow) return res.json({ exists: true });
+  if (adminRow) return res.json({ exists: true, needsPassword: true });
 
-  if (canReadFirebase && (await hubExists(emailRaw))) {
-    return res.json({ exists: true });
+  if (canReadFirebase) {
+    const hubId = await hubExists(emailRaw);
+    return res.json({ exists: true, needsPassword: !hubId });
   }
 
-  res.json({ exists: false });
+  res.json({ exists: false, needsPassword: true });
 });
 
 // Step 2: password check against whichever store step 1 would have matched.
@@ -64,12 +81,30 @@ router.post("/login", async (req, res) => {
     return res.json({ email: adminRow.email, role: "admin" });
   }
 
-  if (canReadFirebase && password === process.env.DEFAULT_USER_PASSWORD) {
+  if (canReadFirebase) {
     const hubId = await hubExists(emailRaw);
+
+    // Approved account - explicit request (2026-08-01): the email existing
+    // as a real hub IS the credential from here on, no password check at
+    // all. Anyone who knows an approved user's email can sign in as them;
+    // accepted tradeoff per this request for this internal tool.
     if (hubId) {
       const token = signSession({ sub: null, email: emailRaw, role: "user", hubId });
       res.cookie(COOKIE_NAME, token, cookieOptions);
       return res.json({ email: emailRaw, role: "user" });
+    }
+
+    // No hub yet - the shared access code doesn't log in directly anymore,
+    // it only queues a request for an admin to approve (see routes/admin.js
+    // for the approval endpoint that actually creates the Firebase hub).
+    // ON CONFLICT keeps the original requested_at instead of bumping it on
+    // every repeat attempt, so "waiting since" stays honest for the admin.
+    if (password === process.env.DEFAULT_USER_PASSWORD) {
+      db.prepare(
+        `INSERT INTO pending_signups (email, requested_at) VALUES (?, ?)
+         ON CONFLICT (email) DO NOTHING`
+      ).run(emailRaw, Date.now());
+      return res.status(202).json({ pending: true });
     }
   }
 

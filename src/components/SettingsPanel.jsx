@@ -62,7 +62,8 @@ function ColumnLabel({ children }) {
 // pattern, just without the number coercion.
 //
 // dirtyRef guards against a real race: BMSDashboard.jsx's settings-sync
-// effect re-syncs `value` from the live Firebase poll every ~5s regardless
+// effect re-syncs `value` from the live Firebase poll (realtime.js's
+// REST_POLL_MS) regardless
 // of whether its content actually changed, unconditionally overwriting
 // `draft` via the effect below - if that lands between the user typing and
 // clicking OK, draft silently reverts to the old value, `dirty` goes

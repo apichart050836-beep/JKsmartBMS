@@ -125,7 +125,7 @@ app.get(/^\/(?!api\/).*/, (_req, res) => {
   res.sendFile(path.join(distPath, "index.html"));
 });
 
-const port = process.env.PORT || 4000;
+const port = process.env.PORT || 10000;
 httpServer.listen(port, () => {
   console.log(`BMS backend listening on http://localhost:${port}`);
 });

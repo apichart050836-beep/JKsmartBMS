@@ -79,3 +79,18 @@ CREATE TABLE IF NOT EXISTS charge_switch_intent (
   updated_at     INTEGER NOT NULL,
   PRIMARY KEY (hub_id, bms_key)
 );
+
+-- Self-service signup requests awaiting admin approval (explicit request,
+-- 2026-08-01): a brand-new email + the correct shared password lands here
+-- instead of immediately getting a Firebase hub - see POST /api/auth/login.
+-- Cleared by DELETE the moment an admin approves it (routes/admin.js),
+-- since at that point the real signal of "approved" becomes "the hub node
+-- now exists in Firebase" and this row has no further purpose. Same
+-- ephemeral-disk caveat as every other table here (see firmware_releases'
+-- comment above) - a pending row can be lost on redeploy if DB_PATH isn't
+-- pointed at a real persistent disk; the requester would just need to
+-- submit the request again.
+CREATE TABLE IF NOT EXISTS pending_signups (
+  email        TEXT PRIMARY KEY,
+  requested_at INTEGER NOT NULL
+);

@@ -5,7 +5,11 @@ import { allowedHubIds } from "./hubAccess.js";
 import { readPath } from "./firebaseRead.js";
 import { isAllowedOrigin } from "./corsOrigin.js";
 
-const REST_POLL_MS = 5000;
+// 2s - explicit request (2026-08-01) for minimum delay, reduced from 5s.
+// Still a plain REST poll per watched path, not a real push - see the
+// .once()-vs-.on() reasoning below for why this stays polling-based rather
+// than switching to a live listener.
+const REST_POLL_MS = 2000;
 
 // Watches a single Firebase path and calls emit(data) whenever a poll
 // delivers something. Always polls via readPath (Admin SDK once()-with-
@@ -14,9 +18,7 @@ const REST_POLL_MS = 5000;
 // (extensively tested), but the one live attempt at a persistent .on()
 // listener broke every subsequent request on that same socket connection
 // (reproduced with a raw curl replay of the Engine.IO handshake: the
-// connect packet succeeds, the very next poll 502s). 5s latency is already
-// the accepted design (matches the 10s offline threshold), so there's
-// nothing lost by not chasing true push here.
+// connect packet succeeds, the very next poll 502s).
 function safeEmit(emit, dataPromise, path) {
   Promise.resolve(emit(dataPromise)).catch((err) => {
     console.error(`watchPath emit failed for ${path}: ${err.message}`);

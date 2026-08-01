@@ -716,34 +716,27 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
   //   backend (see HubDataContext.jsx's socket "connect"/"disconnect") -
   //   not a real Firebase presence path, just "is our own live-data
   //   channel up at all" (this name is a holdover from an earlier design).
-  // - fresh data: status genuinely changed within the last 15s. Confirmed
+  // - fresh data: status genuinely changed within the last 20s. Confirmed
   //   live (2026-07-27, BLE physically unplugged) that jkbms-bridge.yaml
   //   stops writing to Firebase entirely when the BLE link drops - the
   //   value freezes byte-for-byte rather than re-pushing on a heartbeat -
   //   so a real content change is the correct liveness signal here, not
-  //   "did our backend's 5s poll deliver a message" (it always does,
-  //   frozen data included). This is purely the Offline-detection
-  //   threshold - the displayed values themselves still refresh as fast
-  //   as the data can move: the backend polls Firebase every 5s
-  //   (realtime.js's REST_POLL_MS), matching jkbms-bridge.yaml's own ~5s
-  //   push cadence, so there's nothing more real-time to extract there.
-  //   90s: confirmed live (2026-07-28) that info.uptime_seconds only
-  //   actually changes in ~60s jumps (an ESPHome sensor on its own
-  //   60s update_interval, independent of the 5s Firebase push cadence),
-  //   and status can legitimately stay byte-identical for 40+s on a
-  //   genuinely connected but numerically-stable device (idle SOC, steady
-  //   current). A shorter threshold was flipping Online devices to Offline
-  //   just because neither signal happened to move within the window, not
-  //   because the device was actually gone - 90s comfortably clears that
-  //   ~60s quantization with margin for poll jitter. A tighter threshold
-  //   than this isn't achievable from content-diffing alone without the
-  //   ESP32 itself writing a real per-push heartbeat field, which is out
-  //   of scope (ESP32 firmware/protocol changes weren't requested).
-  // 90s - confirmed live (2026-07-28) that a shorter threshold false-flags
-  // Offline on a perfectly healthy device: uptime_seconds only advances in
-  // fixed +60s jumps and status can legitimately stay frozen 40+s while
-  // idle/stable. Do not shorten this without re-confirming against live data.
-  const STALE_AFTER_MS = 90000;
+  //   "did our backend's poll deliver a message" (it always does, frozen
+  //   data included). This is purely the Offline-detection threshold -
+  //   the displayed values themselves still refresh as fast as the data
+  //   can move (see realtime.js's REST_POLL_MS).
+  //   20s - explicit request (2026-08-01), knowingly reduced from the
+  //   previous 90s. info.uptime_seconds itself still only advances in
+  //   ~60s jumps (confirmed live again at this same timestamp - that
+  //   hasn't changed), so this relies entirely on the `status` half of the
+  //   OR-logic below: live sampling showed status content changing on
+  //   almost every ~5-6s backend poll, which comfortably clears 20s in
+  //   practice. Residual risk: a device that's genuinely online but happens
+  //   to have every status field stay byte-identical for over 20s (fully
+  //   idle, no balancing, stable temps) will still flash Offline - accepted
+  //   tradeoff per this request. If false-Offline flicker returns, that's
+  //   the first thing to revisit.
+  const STALE_AFTER_MS = 20000;
 
   const isOnline = active.isLive
     ? !!active.firebaseConnected &&

@@ -1,7 +1,7 @@
 // Dev (two separate Vite/Express ports) needs an absolute URL; a production
 // build is served from the same origin as the API (see server/index.js's
 // express.static), so relative paths just work and "" is correct there.
-const API_BASE = import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? "" : "http://localhost:4000");
+const API_BASE = import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? "" : "http://localhost:10000");
 
 // credentials: "include" on every call - the session lives in an httpOnly
 // cookie set by the backend, never in JS-readable storage (no localStorage
@@ -92,6 +92,13 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ bmsKey }),
     }),
+  // Self-service sign-ups waiting on admin approval (server/routes/admin.js) -
+  // see Login.jsx's "pending" step and AdminMonitor's Pending Sign-ups panel.
+  pendingSignups: () => request("/api/admin/pending-signups"),
+  approvePendingSignup: (email) =>
+    request(`/api/admin/pending-signups/${encodeURIComponent(email)}/approve`, { method: "POST" }),
+  rejectPendingSignup: (email) =>
+    request(`/api/admin/pending-signups/${encodeURIComponent(email)}`, { method: "DELETE" }),
 };
 
 export const API_BASE_URL = API_BASE;

@@ -13,6 +13,7 @@ import {
   ChevronRight,
   Megaphone,
   UploadCloud,
+  UserPlus,
 } from "lucide-react";
 import { api } from "./lib/apiClient.js";
 import { useAdminHubs } from "./hooks/useAdminHubs.js";
@@ -37,6 +38,97 @@ function daysUntil(dateStr) {
   const target = new Date(`${dateStr}T00:00:00`);
   if (Number.isNaN(target.getTime())) return null;
   return Math.ceil((target.getTime() - Date.now()) / 86_400_000);
+}
+
+// Self-service sign-up requests (Login.jsx's access-code step) waiting on
+// an admin to approve them - see server/routes/admin.js. Not Firebase-
+// backed like everything else on this page, so it's not on the live socket
+// feed - polls its own short interval instead of waiting for a full page
+// action. Only renders once there's actually something to show, so an
+// empty queue doesn't add permanent clutter to the fleet view.
+function PendingSignupsPanel() {
+  const [pending, setPending] = useState([]);
+  const [busyEmail, setBusyEmail] = useState(null);
+
+  function refresh() {
+    api.pendingSignups().then((r) => setPending(r.pending ?? [])).catch(() => {});
+  }
+
+  useEffect(() => {
+    refresh();
+    const id = setInterval(refresh, 15000);
+    return () => clearInterval(id);
+  }, []);
+
+  async function approve(email) {
+    setBusyEmail(email);
+    try {
+      await api.approvePendingSignup(email);
+      refresh();
+    } catch {
+      // best-effort - the row just stays in the list, admin can retry
+    } finally {
+      setBusyEmail(null);
+    }
+  }
+
+  async function reject(email) {
+    setBusyEmail(email);
+    try {
+      await api.rejectPendingSignup(email);
+      refresh();
+    } catch {
+      // ignore - same as above
+    } finally {
+      setBusyEmail(null);
+    }
+  }
+
+  if (pending.length === 0) return null;
+
+  return (
+    <div className="mb-4 rounded-2xl bg-[var(--card)] p-4 shadow-sm ring-1 ring-amber-300/60">
+      <div className="mb-3 flex items-center gap-2">
+        <span className="flex size-8 items-center justify-center rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400">
+          <UserPlus className="size-4" />
+        </span>
+        <p className="text-sm font-bold text-[var(--foreground)]">คำขอเข้าใช้งานใหม่ ({pending.length})</p>
+      </div>
+      <div className="space-y-2">
+        {pending.map((p) => (
+          <div
+            key={p.email}
+            className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-[var(--muted)] px-3 py-2 text-sm"
+          >
+            <div>
+              <p className="font-semibold text-[var(--foreground)]">{p.email}</p>
+              <p className="text-[11px] text-[var(--muted-foreground)]">{new Date(p.requestedAt).toLocaleString("th-TH")}</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={busyEmail === p.email}
+                onClick={() => approve(p.email)}
+                className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+              >
+                <Check className="size-3.5" />
+                อนุมัติ
+              </button>
+              <button
+                type="button"
+                disabled={busyEmail === p.email}
+                onClick={() => reject(p.email)}
+                className="inline-flex items-center gap-1 rounded-lg bg-[var(--card)] px-3 py-1.5 text-xs font-semibold text-[var(--muted-foreground)] ring-1 ring-[var(--border)] transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+              >
+                <XIcon className="size-3.5" />
+                ปฏิเสธ
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function KpiCard({ icon: Icon, label, value, tone = "zinc" }) {
@@ -327,6 +419,8 @@ export default function AdminMonitor() {
           แจ้ง Update
         </button>
       </div>
+
+      <PendingSignupsPanel />
 
       {/* Fleet Overview KPI cards */}
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
