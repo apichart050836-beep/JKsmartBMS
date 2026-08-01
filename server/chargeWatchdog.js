@@ -1,8 +1,8 @@
 import { db } from "./db.js";
 import { readPath, writePath } from "./firebaseRead.js";
 
-// Every 1 minute, per explicit request.
-const CHECK_INTERVAL_MS = 60_000;
+// Every 5 seconds, per explicit request (was 1 minute).
+const CHECK_INTERVAL_MS = 5_000;
 
 // A device's real BLE-read shape (see bmsShape.js's frontend twin) - status
 // and settings are both real objects. Kept minimal/local here rather than
