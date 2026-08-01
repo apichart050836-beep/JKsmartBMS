@@ -80,6 +80,19 @@ CREATE TABLE IF NOT EXISTS charge_switch_intent (
   PRIMARY KEY (hub_id, bms_key)
 );
 
+-- Same idea as charge_switch_intent above, for the Balancer Switch
+-- (explicit request, 2026-08-01) - kept as its own table rather than a
+-- second column on charge_switch_intent so each switch's intent history
+-- stays independent (a user turning charge off deliberately says nothing
+-- about what they want the balancer to do, and vice versa).
+CREATE TABLE IF NOT EXISTS balancer_switch_intent (
+  hub_id           TEXT NOT NULL,
+  bms_key          TEXT NOT NULL DEFAULT '',
+  desired_balancer INTEGER NOT NULL,
+  updated_at       INTEGER NOT NULL,
+  PRIMARY KEY (hub_id, bms_key)
+);
+
 -- Self-service signup requests awaiting admin approval (explicit request,
 -- 2026-08-01): a brand-new email + the correct shared password lands here
 -- instead of immediately getting a Firebase hub - see POST /api/auth/login.

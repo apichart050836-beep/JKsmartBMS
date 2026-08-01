@@ -64,15 +64,20 @@ router.patch("/:hubId/settings", requireAuth, requireFirebase, async (req, res) 
   }
   try {
     await writePath(`${devicePath(hubId, bmsKey)}/settings/${key}`, value);
-    // Records the user's own deliberate Charge Switch command so
+    // Records the user's own deliberate Charge/Balancer Switch command so
     // chargeWatchdog.js can tell "the user turned it off" apart from "it's
-    // off with no known command behind it" (see schema.sql's comment on
-    // this table) - only relevant for this one key, every other setting
-    // just writes through as before.
+    // off with no known command behind it" (see schema.sql's comments on
+    // these two tables) - only relevant for these two keys, every other
+    // setting just writes through as before.
     if (key === "charge") {
       db.prepare(
         `INSERT INTO charge_switch_intent (hub_id, bms_key, desired_charge, updated_at) VALUES (?, ?, ?, ?)
          ON CONFLICT (hub_id, bms_key) DO UPDATE SET desired_charge = excluded.desired_charge, updated_at = excluded.updated_at`
+      ).run(hubId, bmsKey ?? "", value ? 1 : 0, Date.now());
+    } else if (key === "balancer") {
+      db.prepare(
+        `INSERT INTO balancer_switch_intent (hub_id, bms_key, desired_balancer, updated_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT (hub_id, bms_key) DO UPDATE SET desired_balancer = excluded.desired_balancer, updated_at = excluded.updated_at`
       ).run(hubId, bmsKey ?? "", value ? 1 : 0, Date.now());
     }
     res.json({ ok: true });

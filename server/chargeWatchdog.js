@@ -26,9 +26,13 @@ const lastUptimeByDevice = new Map();
 // confirmed in src/lib/alarms.js's computeAlarms, just against the raw
 // Firebase field names instead of the dashboard's translated ones (no
 // REMOTE_SETTINGS_MAP available here). Any one of these being breached
-// means the BMS turning charging off is a legitimate protection response,
-// not an unexplained reset - never auto-corrected.
-function chargeSafetyReason(status, settings) {
+// means the BMS turning a switch off is a legitimate protection response,
+// not an unexplained reset - never auto-corrected. Reused for the Balancer
+// Switch too (2026-08-01) - there's no separate balancer-specific
+// protection register anywhere in the Firebase settings shape, but a pack
+// that's genuinely over-temp/over-voltage shouldn't get balancing forced
+// back on either (it still draws bleed current and generates heat).
+function packSafetyReason(status, settings) {
   const t1 = status.battery_t1;
   const t2 = status.battery_t2;
   const maxTemp = Math.max(typeof t1 === "number" ? t1 : -Infinity, typeof t2 === "number" ? t2 : -Infinity);
@@ -52,9 +56,54 @@ function chargeSafetyReason(status, settings) {
   return null;
 }
 
+// Charge and Balancer switches both follow the exact same rule: already on
+// -> do nothing; off because the user themselves last set it off (per the
+// matching *_switch_intent table) -> respected, never touched; off with a
+// real protection condition behind it -> respected, never touched; off with
+// no explanation at all -> re-enable. `settingsKey` is the Firebase
+// settings/<key> field, `intentTable`/`intentColumn` are the matching SQLite
+// table from schema.sql, `label` is only for the console log.
+async function checkSwitch(hubId, bmsKey, data, { settingsKey, intentTable, intentColumn, label }) {
+  const { status, settings } = data;
+  const deviceLabel = bmsKey ? `${hubId}/${bmsKey}` : hubId;
+
+  if (settings[settingsKey] !== false) return; // spec: already on -> nothing to do
+
+  const row = db
+    .prepare(`SELECT ${intentColumn} AS desired FROM ${intentTable} WHERE hub_id = ? AND bms_key = ?`)
+    .get(hubId, bmsKey ?? "");
+  if (!row) {
+    // No recorded user command for this device/switch at all yet -
+    // critically, this must NOT seed from the device's current state. If it
+    // seeded "off" (because it happens to be off right now, e.g. exactly
+    // the unexplained-reset case this feature exists to fix), that bug
+    // would get permanently entrenched as "the user's own choice" the very
+    // first time the watchdog ever looked at it. Safer to do nothing in
+    // either direction until routes/hubs.js records a real command from the
+    // user toggling the switch themselves - from that point on this
+    // device/switch is fully covered.
+    return;
+  }
+  if (row.desired === 0) {
+    return; // user's own last command was OFF - respected, never touched
+  }
+
+  const safetyReason = packSafetyReason(status, settings);
+  if (safetyReason) {
+    console.log(`[ChargeWatchdog] ${deviceLabel}: ${label} is off, explained by ${safetyReason} - not overriding`);
+    return;
+  }
+
+  console.log(`[ChargeWatchdog] ${deviceLabel}: ${label} is off with no user command or protection condition behind it - re-enabling`);
+  const path = bmsKey
+    ? `JK_BMS_HUB/${hubId}/${bmsKey}/settings/${settingsKey}`
+    : `JK_BMS_HUB/${hubId}/settings/${settingsKey}`;
+  await writePath(path, true);
+}
+
 async function checkDevice(hubId, bmsKey, data) {
   const label = bmsKey ? `${hubId}/${bmsKey}` : hubId;
-  const { status, settings } = data;
+  const { status } = data;
 
   // Admin's kill switch (see routes/admin.js) is someone else's explicit
   // decision too - same reasoning as respecting the user's own OFF below,
@@ -70,36 +119,18 @@ async function checkDevice(hubId, bmsKey, data) {
     return;
   }
 
-  if (settings.charge !== false) return; // spec: already on -> nothing to do
-
-  const row = db
-    .prepare(`SELECT desired_charge FROM charge_switch_intent WHERE hub_id = ? AND bms_key = ?`)
-    .get(hubId, bmsKey ?? "");
-  if (!row) {
-    // No recorded user command for this device at all yet - critically,
-    // this must NOT seed from the device's current state. If it seeded
-    // "off" (because it happens to be off right now, e.g. exactly the
-    // unexplained-reset case this feature exists to fix), that bug would
-    // get permanently entrenched as "the user's own choice" the very first
-    // time the watchdog ever looked at it. Safer to do nothing in either
-    // direction until routes/hubs.js records a real command from the user
-    // toggling the switch themselves - from that point on this device is
-    // fully covered.
-    return;
-  }
-  if (row.desired_charge === 0) {
-    return; // user's own last command was OFF - respected, never touched
-  }
-
-  const safetyReason = chargeSafetyReason(status, settings);
-  if (safetyReason) {
-    console.log(`[ChargeWatchdog] ${label}: charge is off, explained by ${safetyReason} - not overriding`);
-    return;
-  }
-
-  console.log(`[ChargeWatchdog] ${label}: charge is off with no user command or protection condition behind it - re-enabling`);
-  const path = bmsKey ? `JK_BMS_HUB/${hubId}/${bmsKey}/settings/charge` : `JK_BMS_HUB/${hubId}/settings/charge`;
-  await writePath(path, true);
+  await checkSwitch(hubId, bmsKey, data, {
+    settingsKey: "charge",
+    intentTable: "charge_switch_intent",
+    intentColumn: "desired_charge",
+    label: "Charge",
+  });
+  await checkSwitch(hubId, bmsKey, data, {
+    settingsKey: "balancer",
+    intentTable: "balancer_switch_intent",
+    intentColumn: "desired_balancer",
+    label: "Balancer",
+  });
 }
 
 async function runCycle() {
