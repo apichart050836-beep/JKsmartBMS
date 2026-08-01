@@ -24,7 +24,7 @@ import HomePage from "./HomePage.jsx";
 import { ThemeRoot } from "./components/ThemeRoot.jsx";
 import { ThemeProvider } from "./context/ThemeContext.jsx";
 import { AuthProvider, useAuth } from "./context/AuthContext.jsx";
-import { HubDataProvider } from "./context/HubDataContext.jsx";
+import { HubDataProvider, useHubData } from "./context/HubDataContext.jsx";
 import { LogoutModal } from "./components/LogoutModal.jsx";
 
 // ตัวเลือกชิปประมวลผลที่รองรับ
@@ -453,6 +453,46 @@ function ESPFirmwareInstaller() {
   );
 }
 
+// Collapsed to just the role by default ("user"/"admin") - tap/click to
+// reveal the email + this account's expiration date. Needs useHubData()
+// (for the expiration lookup) so it's a separate component rendered inside
+// <HubDataProvider>, same reasoning as UpdateBadge above.
+function UserMenu({ user }) {
+  const { hubs } = useHubData();
+  const [expanded, setExpanded] = useState(false);
+
+  // A 'user' session owns exactly one hub (its own hubId, from /api/auth/me
+  // - see hubAccess.js); admin sessions have hubId: null and no personal
+  // expiration to show. Matches the same admin.expirationDate/expire_date
+  // precedence AdminMonitor's useAdminHubs.js already uses.
+  const hubData = user.hubId ? hubs[user.hubId] : null;
+  const expirationDate = hubData?.admin?.expirationDate ?? hubData?.expire_date ?? null;
+
+  return (
+    <button
+      type="button"
+      onClick={() => setExpanded((v) => !v)}
+      title="แตะเพื่อดูอีเมลและวันหมดอายุ"
+      className="rounded-lg px-2 py-1 text-right text-xs text-[var(--muted-foreground)] transition-colors hover:bg-[var(--muted)]"
+    >
+      {expanded ? (
+        <span className="flex flex-col leading-tight">
+          <span className="text-[var(--foreground)]">{user.email}</span>
+          <span className="text-[10px]">
+            {user.hubId
+              ? expirationDate
+                ? `หมดอายุ: ${expirationDate}`
+                : "ไม่ได้กำหนดวันหมดอายุ"
+              : user.role}
+          </span>
+        </span>
+      ) : (
+        <span className="font-semibold text-[var(--foreground)]">{user.role}</span>
+      )}
+    </button>
+  );
+}
+
 // ==========================================
 // Main Router Container
 // ==========================================
@@ -498,9 +538,7 @@ function AuthedApp() {
           })}
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-[var(--muted-foreground)]">
-            {user.email} · <span className="font-semibold text-[var(--foreground)]">{user.role}</span>
-          </span>
+          <UserMenu user={user} />
           {activePage !== "dashboard" && (
             <button
               type="button"

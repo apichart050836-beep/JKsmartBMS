@@ -146,7 +146,11 @@ router.post("/logout", (_req, res) => {
 });
 
 router.get("/me", requireAuth, (req, res) => {
-  res.json({ email: req.user.email, role: req.user.role });
+  // hubId lets the frontend look up this session's own hub node (e.g. its
+  // admin-set expirationDate) straight out of HubDataContext's already-
+  // loaded tree, without a separate lookup route. null for admin sessions
+  // (see hubAccess.js - they have no single owned hub).
+  res.json({ email: req.user.email, role: req.user.role, hubId: req.user.hubId ?? null });
 });
 
 export default router;
