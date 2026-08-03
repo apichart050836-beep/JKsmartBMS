@@ -21,6 +21,7 @@ import BMSDashboard from "./BMSDashboard.jsx";
 import AdminMonitor from "./AdminMonitor.jsx";
 import Login from "./Login.jsx";
 import HomePage from "./HomePage.jsx";
+import BmsManager from "./components/BmsManager.jsx";
 import { ThemeRoot } from "./components/ThemeRoot.jsx";
 import { ThemeProvider } from "./context/ThemeContext.jsx";
 import { AuthProvider, useAuth } from "./context/AuthContext.jsx";

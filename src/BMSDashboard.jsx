@@ -404,11 +404,15 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
   // Reports the active device's versions up to App.jsx, which renders the
   // Update badge/button next to the "Dashboard" nav pill (outside this
   // component) and its "check for update" popup - hardware_version is the
-  // real field for "BMS Version" (e.g. "15H"), confirmed live alongside
-  // software_version on the same info node.
+  // real field for "BMS Version" (e.g. "15H"). "software" here is the
+  // ESP32's OWN firmware version (info.esp_firmware_version, written by the
+  // ESP32's own version text sensor) - info.software_version looks similar
+  // but is actually the JK BMS chip's own version, a mislabeling caught and
+  // fixed 2026-08-01 (was showing the wrong device's version as "ESP32
+  // Software").
   useEffect(() => {
     onSoftwareVersionChange?.({
-      software: active.info?.software_version ?? null,
+      software: active.info?.esp_firmware_version ?? null,
       hardware: active.info?.hardware_version ?? null,
       deviceLabel: active.name,
       hubId: activeConfig.hubId ?? null,
@@ -418,7 +422,7 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
       firmware: active.firmware ?? null,
     });
   }, [
-    active.info?.software_version,
+    active.info?.esp_firmware_version,
     active.info?.hardware_version,
     active.name,
     active.firmware,
@@ -427,18 +431,18 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
     onSoftwareVersionChange,
   ]);
 
-  // ESP32 firmware version - real field (info.software_version), same
+  // ESP32 firmware version - real field (info.esp_firmware_version), same
   // object already used for battery_type elsewhere. There's no dedicated
   // "update in progress" field in Firebase, so a firmware update is
   // inferred the only way it's observable here: this specific device's
-  // own software_version reading changing value between polls. Tracked
+  // own esp_firmware_version reading changing value between polls. Tracked
   // per-slot (not globally) so switching to a device that just happens to
   // run a different version doesn't get mistaken for an update.
   const prevVersionsRef = useRef({});
   const [firmwareUpdate, setFirmwareUpdate] = useState(null);
   useEffect(() => {
     for (const pack of packs) {
-      const version = pack.info?.software_version;
+      const version = pack.info?.esp_firmware_version;
       if (!version) continue;
       const prev = prevVersionsRef.current[pack.id];
       if (prev !== undefined && prev !== version) {

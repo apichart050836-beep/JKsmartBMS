@@ -66,9 +66,13 @@ export function useAdminHubs() {
         : socketConnected && !!lastSeenAt && now - lastSeenAt < STALE_AFTER_MS,
       expireDate: admin.expirationDate ?? data.expire_date ?? null,
       buildDate: isNested ? (hubs[hubId]?.build_date ?? null) : admin.espBuildDate ?? null,
-      // ESP32/ESPHome's own reported version (same source VersionCheckModal
-      // labels "ESP32 Software" on the user Dashboard).
-      firmwareVersion: data.firmware_version ?? data.info?.software_version ?? null,
+      // ESP32/ESPHome's own reported version - info.esp_firmware_version is
+      // the real field for this (written by the ESP32's own firmware
+      // version text sensor). info.software_version looks similar but is
+      // actually the JK BMS chip's own version, not the ESP32's (see
+      // bmsVersion below) - kept as a fallback only for older devices that
+      // don't report esp_firmware_version yet.
+      firmwareVersion: data.info?.esp_firmware_version ?? data.firmware_version ?? data.info?.software_version ?? null,
       // The physical JK BMS chip's own version, read over BLE - a totally
       // separate piece of hardware from the ESP32, and not something this
       // app's OTA system can ever flash (same source VersionCheckModal

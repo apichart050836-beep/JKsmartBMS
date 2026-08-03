@@ -66,7 +66,12 @@ export function SystemHero({
     alarms = [],
     onOpenAlarms,
     onFirmwareUpdate,
-    firmwareVersion = "v1.2.4.3",
+    // Real field, written by the ESP32 itself (esp_firmware_version text
+    // sensor) - distinct from info.software_version, which is the JK BMS
+    // chip's own version, not the ESP32's. Explicit `firmwareVersion` prop
+    // (if ever passed) still wins; falls back to a placeholder only when
+    // neither is available (e.g. this device has never reported it).
+    firmwareVersion = info?.esp_firmware_version ? `v${info.esp_firmware_version}` : "v1.2.4.3",
 }) {
     const isCharging = status === "Charging";
   
