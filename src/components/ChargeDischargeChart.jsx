@@ -393,15 +393,17 @@ export function ChargeDischargeChart({ history = [], hubId, bmsKey }) {
                   fine 5-min grid rides on the SAME axis as the visible
                   labels (a separate hidden second axis+grid, tried first,
                   rendered zero lines - recharts didn't pick up its ticks) -
-                  tickFormatter below is what keeps only every-2-hours
-                  labeled, independent of how many gridlines are drawn. */}
+                  tickFormatter below is what keeps only every-4-hours
+                  labeled (matches the original spacing), independent of how
+                  many gridlines are drawn. Finer-than-4h detail is what the
+                  hover tooltip is for (AreaTooltip), not the axis labels. */}
               <CartesianGrid stroke="var(--border)" strokeOpacity={0.6} />
               <XAxis
                 dataKey="hour"
                 type="number"
                 domain={[0, 24]}
                 ticks={FIVE_MIN_GRID_TICKS}
-                tickFormatter={(h) => (Number.isInteger(h) && h % 2 === 0 ? `${pad2(h)}:00` : "")}
+                tickFormatter={(h) => (Number.isInteger(h) && h % 4 === 0 ? `${pad2(h)}:00` : "")}
                 tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
                 axisLine={{ stroke: "var(--border)" }}
                 tickLine={false}

@@ -13,6 +13,7 @@ import {
   Wifi,
   Bluetooth,
   Radio,
+  PlusCircle,
 } from "lucide-react";
 import { ESPLoader, Transport } from "esptool-js";
 import { BrowserRouter } from "react-router-dom";
@@ -500,6 +501,7 @@ function UserMenu({ user }) {
 const PAGES = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, userOnly: true },
   { id: "admin", label: "Admin Monitor", icon: ShieldCheck, adminOnly: true },
+  { id: "bms-manager", label: "เพิ่มอุปกรณ์", icon: PlusCircle },
   { id: "install-firmware", label: "Install Firmware", icon: Download },
 ];
 
@@ -557,6 +559,12 @@ function AuthedApp() {
 
       {activePage === "dashboard" && <BMSDashboard />}
       {activePage === "admin" && <AdminMonitor />}
+
+      {activePage === "bms-manager" && (
+        <div className="mx-auto max-w-7xl px-3 py-6 sm:px-5 md:px-7">
+          <BmsManager />
+        </div>
+      )}
 
       {activePage === "install-firmware" && (
         <div className="mx-auto max-w-7xl px-3 py-6 sm:px-5 md:px-7">
