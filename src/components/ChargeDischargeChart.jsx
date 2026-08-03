@@ -68,6 +68,11 @@ function toMonthStr(d) {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
 }
 
+// Fine vertical gridlines every 5 minutes (0, 1/12, 2/12, ... 24), separate
+// from the visible tick labels below - stepping by minutes (not fractional
+// hours) avoids float-drift landing a tick a hair off a clean value.
+const FIVE_MIN_GRID_TICKS = Array.from({ length: 24 * 60 / 5 + 1 }, (_, i) => (i * 5) / 60);
+
 function LegendDot({ color, label }) {
   return (
     <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-[var(--muted-foreground)]">
@@ -382,16 +387,23 @@ export function ChargeDischargeChart({ history = [], hubId, bmsKey }) {
                   <stop offset="100%" stopColor={DISCHARGE_COLOR} stopOpacity={0.02} />
                 </linearGradient>
               </defs>
-              <CartesianGrid stroke="var(--border)" vertical={false} />
+              {/* CartesianGrid draws one vertical line per XAxis tick, so the
+                  fine 5-min grid rides on the SAME axis as the visible
+                  labels (a separate hidden second axis+grid, tried first,
+                  rendered zero lines - recharts didn't pick up its ticks) -
+                  tickFormatter below is what keeps only every-2-hours
+                  labeled, independent of how many gridlines are drawn. */}
+              <CartesianGrid stroke="var(--border)" strokeOpacity={0.6} />
               <XAxis
                 dataKey="hour"
                 type="number"
                 domain={[0, 24]}
-                ticks={[0, 4, 8, 12, 16, 20, 24]}
-                tickFormatter={(h) => `${pad2(h)}:00`}
+                ticks={FIVE_MIN_GRID_TICKS}
+                tickFormatter={(h) => (Number.isInteger(h) && h % 2 === 0 ? `${pad2(h)}:00` : "")}
                 tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
                 axisLine={{ stroke: "var(--border)" }}
                 tickLine={false}
+                interval={0}
               />
               <YAxis
                 tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
