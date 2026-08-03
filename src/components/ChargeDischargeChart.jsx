@@ -33,8 +33,8 @@ const MOCK_DATA = [
   { time: "22:00", hour: 22, current: -3.9 },
 ];
 
-const CHARGE_COLOR = "#10b981";
-const DISCHARGE_COLOR = "#f59e0b";
+const CHARGE_COLOR = "#8b5cf6";
+const DISCHARGE_COLOR = "#f97316";
 
 // Same illustrative purpose as MOCK_DATA above, but shaped for the bar
 // views (Monthly/Yearly) - a smooth two-phase wave per label so it never
@@ -79,8 +79,11 @@ function LegendDot({ color, label }) {
 
 function AreaTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
-  const charge = payload.find((p) => p.dataKey === "charge")?.value;
-  const discharge = payload.find((p) => p.dataKey === "discharge")?.value;
+  // charge/discharge are now both always-present positive-or-zero magnitudes
+  // (see areaData above) rather than one being null - so "which one is
+  // active" is a >0 check, not a typeof check.
+  const charge = payload.find((p) => p.dataKey === "charge")?.value ?? 0;
+  const discharge = payload.find((p) => p.dataKey === "discharge")?.value ?? 0;
   // The X axis now plots by numeric hour-of-day (so the daily chart always
   // spans the full 0-24h range regardless of how much of the day has real
   // data), so `label` here is a bare number (e.g. 13.5) - the human-readable
@@ -89,13 +92,13 @@ function AreaTooltip({ active, payload, label }) {
   return (
     <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs shadow-lg">
       <p className="mb-1 font-semibold text-[var(--foreground)]">{displayLabel}</p>
-      {typeof charge === "number" && (
+      {charge > 0 && (
         <p className="tabular-nums" style={{ color: CHARGE_COLOR }}>Charge · {charge.toFixed(2)} A</p>
       )}
-      {typeof discharge === "number" && (
-        <p className="tabular-nums" style={{ color: DISCHARGE_COLOR }}>Discharge · {Math.abs(discharge).toFixed(2)} A</p>
+      {discharge > 0 && (
+        <p className="tabular-nums" style={{ color: DISCHARGE_COLOR }}>Discharge · {discharge.toFixed(2)} A</p>
       )}
-      {typeof charge !== "number" && typeof discharge !== "number" && (
+      {charge === 0 && discharge === 0 && (
         <p className="tabular-nums text-[var(--muted-foreground)]">Idle · 0.00 A</p>
       )}
     </div>
@@ -214,11 +217,13 @@ export function ChargeDischargeChart({ history = [], hubId, bmsKey }) {
   // since `daily` starts each fetch cycle back at its prior/null value.
   const isAreaMock = view === "daily" && !loading && !hasRealDaily;
   const areaSource = isAreaMock ? MOCK_DATA : hasRealDaily ? dailyPoints : history.map((h) => ({ time: h.time, hour: h.hour, current: h.current }));
-  // Two genuinely separate series (not one line whose color switches at
-  // zero) - null on whichever side isn't active at that point, so recharts
-  // draws Charge and Discharge as distinct lines instead of one merged,
-  // harder-to-read line. Discharge keeps its real negative value (plots
-  // below zero), matching "ใช้งาน (-) ลงล่าง" in the header.
+  // Two genuinely separate series, both plotted as positive magnitudes
+  // rising from a shared 0 baseline (not split above/below zero) - gives the
+  // overlapping-wave look requested, with color (purple vs orange) as the
+  // only thing distinguishing which is which. `charge` is 0 (not null)
+  // whenever discharging and vice versa, since the pack is never doing both
+  // at once - that's what makes the two curves trade off across the day
+  // instead of leaving gaps.
   // `hour` (numeric, 0-24) drives X position so the axis always spans the
   // full day - a `time`-keyed categorical axis only shows however many
   // hours actually have data, which looked like the chart was "missing"
@@ -226,20 +231,20 @@ export function ChargeDischargeChart({ history = [], hubId, bmsKey }) {
   const areaData = areaSource.map((d) => ({
     hour: d.hour,
     timeLabel: d.time,
-    charge: d.current > 0 ? d.current : null,
-    discharge: d.current < 0 ? d.current : null,
+    charge: d.current > 0 ? d.current : 0,
+    discharge: d.current < 0 ? Math.abs(d.current) : 0,
   }));
 
   const values = areaSource.map((d) => d.current);
   const maxV = Math.max(0, ...values);
   const minV = Math.min(0, ...values);
 
-  // Fixed 10A steps, symmetric around 0 - same "clean round numbers" treatment
-  // as the Monthly/Yearly Ah axis, just scaled to Amps for this view.
+  // Fixed 10A steps on a single unsigned axis (0 upward) - both series climb
+  // from the same baseline now, so there's no need for a symmetric +/- scale.
   const A_STEP = 10;
   const areaAxisMax = Math.ceil(Math.max(10, Math.abs(maxV), Math.abs(minV)) / A_STEP) * A_STEP;
   const areaTicks = [];
-  for (let v = -areaAxisMax; v <= areaAxisMax; v += A_STEP) areaTicks.push(v);
+  for (let v = 0; v <= areaAxisMax; v += A_STEP) areaTicks.push(v);
 
   // Full calendar skeleton (all days of the month / all 12 months of the
   // year), independent of whether the history fetch has resolved yet - a
@@ -300,7 +305,7 @@ export function ChargeDischargeChart({ history = [], hubId, bmsKey }) {
           </div>
           <div>
             <h2 className="text-sm font-semibold text-[var(--foreground)]">Charge / Discharge</h2>
-            <p className="text-[11px] text-[var(--muted-foreground)]">ชาร์จ (+) ขึ้นบน · ใช้งาน (-) ลงล่าง</p>
+            <p className="text-[11px] text-[var(--muted-foreground)]">กระแสไฟฟ้า (A) ตลอดวัน</p>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -365,13 +370,16 @@ export function ChargeDischargeChart({ history = [], hubId, bmsKey }) {
           {view === "daily" ? (
             <AreaChart data={areaData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
               <defs>
+                {/* Both series now climb from the same 0 baseline, so both
+                    gradients fade the same direction: dense near the curve,
+                    transparent down at the axis. */}
                 <linearGradient id={fillId} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={CHARGE_COLOR} stopOpacity={0.3} />
-                  <stop offset="100%" stopColor={CHARGE_COLOR} stopOpacity={0.03} />
+                  <stop offset="0%" stopColor={CHARGE_COLOR} stopOpacity={0.35} />
+                  <stop offset="100%" stopColor={CHARGE_COLOR} stopOpacity={0.02} />
                 </linearGradient>
                 <linearGradient id={strokeId} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={DISCHARGE_COLOR} stopOpacity={0.03} />
-                  <stop offset="100%" stopColor={DISCHARGE_COLOR} stopOpacity={0.3} />
+                  <stop offset="0%" stopColor={DISCHARGE_COLOR} stopOpacity={0.35} />
+                  <stop offset="100%" stopColor={DISCHARGE_COLOR} stopOpacity={0.02} />
                 </linearGradient>
               </defs>
               <CartesianGrid stroke="var(--border)" vertical={false} />
@@ -391,35 +399,36 @@ export function ChargeDischargeChart({ history = [], hubId, bmsKey }) {
                 tickLine={false}
                 width={32}
                 unit="A"
-                domain={[-areaAxisMax, areaAxisMax]}
+                domain={[0, areaAxisMax]}
                 ticks={areaTicks}
               />
               <Tooltip content={<AreaTooltip />} cursor={{ stroke: "var(--border)", strokeWidth: 1 }} />
-              <ReferenceLine y={0} stroke="var(--muted-foreground)" strokeOpacity={0.4} />
-              {/* Two genuinely separate series, not one line that switches
-                  color at zero - easier to read at a glance which is which. */}
+              {/* Two genuinely separate series sharing one baseline, not
+                  split above/below zero - color (purple/orange) is what
+                  distinguishes which is which, giving the overlapping-wave
+                  look instead of a mirrored up/down chart. */}
               <Area
                 type="monotone"
                 dataKey="charge"
                 stroke={CHARGE_COLOR}
-                strokeWidth={2}
+                strokeWidth={2.5}
                 strokeLinecap="round"
+                strokeLinejoin="round"
                 fill={`url(#${fillId})`}
                 dot={false}
                 activeDot={{ r: 4, strokeWidth: 2, stroke: "var(--card)" }}
-                connectNulls={false}
                 isAnimationActive={!isAreaMock}
               />
               <Area
                 type="monotone"
                 dataKey="discharge"
                 stroke={DISCHARGE_COLOR}
-                strokeWidth={2}
+                strokeWidth={2.5}
                 strokeLinecap="round"
+                strokeLinejoin="round"
                 fill={`url(#${strokeId})`}
                 dot={false}
                 activeDot={{ r: 4, strokeWidth: 2, stroke: "var(--card)" }}
-                connectNulls={false}
                 isAnimationActive={!isAreaMock}
               />
             </AreaChart>
