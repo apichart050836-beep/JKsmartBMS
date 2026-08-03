@@ -291,9 +291,11 @@ export function ChargeDischargeChart({ history = [], hubId, bmsKey }) {
 
   // Fixed 20 Ah steps, symmetric around 0 (charged bars go up, discharged go
   // down) - a clean, predictable scale instead of whatever odd numbers
-  // recharts' auto-domain would otherwise pick.
+  // recharts' auto-domain would otherwise pick. Floor of 100 guarantees
+  // 0/20/40/60/80/100 are always on the axis even on a low-activity day;
+  // it only grows past that if real data actually exceeds it.
   const AH_STEP = 20;
-  const barMaxAbs = Math.max(20, ...barData.flatMap((d) => [Math.abs(d.charged), Math.abs(d.discharged)]));
+  const barMaxAbs = Math.max(100, ...barData.flatMap((d) => [Math.abs(d.charged), Math.abs(d.discharged)]));
   const barAxisMax = Math.ceil(barMaxAbs / AH_STEP) * AH_STEP;
   const barTicks = [];
   for (let v = -barAxisMax; v <= barAxisMax; v += AH_STEP) barTicks.push(v);
@@ -456,6 +458,7 @@ export function ChargeDischargeChart({ history = [], hubId, bmsKey }) {
                 unit="Ah"
                 domain={[-barAxisMax, barAxisMax]}
                 ticks={barTicks}
+                interval={0}
               />
               <Tooltip content={<BarTooltip />} cursor={{ fill: "var(--muted)", opacity: 0.5 }} />
               <ReferenceLine y={0} stroke="var(--muted-foreground)" strokeOpacity={0.4} />
