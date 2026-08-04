@@ -113,8 +113,13 @@ export function SystemHero({
         setStatusMessage("[1/2] กำลังส่งไฟล์ Firmware ไปยัง Backend Server...");
         setUpdateProgress(0);
 
-        // 🎯 ใช้ Relative Path ได้เลย! Vite Proxy จะส่งไป http://localhost:4000/api/esphome/update ให้เอง
-        const backendUrl = "http://localhost:4000/api/esphome/update";
+        // Relative path - Vite's dev proxy forwards this to localhost:4000,
+        // and on the deployed site it's same-origin to the real backend.
+        // A hardcoded "http://localhost:4000/..." here would make the
+        // browser try to reach the VIEWER's own machine on the live site,
+        // not the actual server - confirmed live (that's exactly what was
+        // producing "ไม่สามารถเชื่อมต่อกับ Backend Server ได้" in production).
+        const backendUrl = "/api/esphome/update";
 
         const formData = new FormData();
         formData.append("file", selectedFile);
