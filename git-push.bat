@@ -16,8 +16,26 @@ if "%~1"=="" (
 git commit -m "%MSG%"
 if errorlevel 1 (
     echo Nothing to commit.
+    pause
     exit /b 0
 )
 
 git pull --rebase origin main
+if errorlevel 1 (
+    echo.
+    echo *** git pull --rebase FAILED - see errors above ***
+    pause
+    exit /b 1
+)
+
 git push origin main
+if errorlevel 1 (
+    echo.
+    echo *** git push FAILED - see errors above ***
+    pause
+    exit /b 1
+)
+
+echo.
+echo Done.
+pause
