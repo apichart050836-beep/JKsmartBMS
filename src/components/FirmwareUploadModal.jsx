@@ -29,11 +29,27 @@ export function FirmwareUploadModal({ onClose, currentRelease, devices = [] }) {
   const [firebaseResults, setFirebaseResults] = useState(null);
 
   const deviceOptions = useMemo(
-    () => devices.map((d) => ({ hubId: d.hubId, bmsKey: d.bmsKey ?? null, label: d.label, isOnline: d.isOnline })),
+    () =>
+      devices.map((d) => ({
+        hubId: d.hubId,
+        bmsKey: d.bmsKey ?? null,
+        label: d.label,
+        isOnline: d.isOnline,
+        firmwareVersion: d.firmwareVersion ?? null,
+      })),
     [devices]
   );
   const targetKey = (d) => `${d.hubId}/${d.bmsKey ?? ""}`;
   const allSelected = deviceOptions.length > 0 && selected.size === deviceOptions.length;
+
+  // The real esp_firmware_version an actual connected device is reporting
+  // right now (useAdminHubs.js already resolves this field, same source
+  // VersionCheckModal reads) - prefers an online device since that's a live
+  // read, not a stale one from before the device last disconnected.
+  const liveVersion = useMemo(() => {
+    const online = deviceOptions.find((d) => d.isOnline && d.firmwareVersion);
+    return online?.firmwareVersion ?? deviceOptions.find((d) => d.firmwareVersion)?.firmwareVersion ?? null;
+  }, [deviceOptions]);
 
   // Default to "every known device" the first time the list actually has
   // devices in it (AdminMonitor's live socket data can arrive a beat after
@@ -49,6 +65,16 @@ export function FirmwareUploadModal({ onClose, currentRelease, devices = [] }) {
     setSelected(new Set(deviceOptions.map(targetKey)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deviceOptions]);
+
+  // Prefills the version field from the live device reading so the admin
+  // isn't typing it blind - only while they haven't touched the field
+  // themselves (versionTouched), so this never clobbers something they're
+  // actively editing once liveVersion arrives a beat later.
+  const [versionTouched, setVersionTouched] = useState(false);
+  useEffect(() => {
+    if (versionTouched || !liveVersion) return;
+    setVersion(liveVersion);
+  }, [liveVersion, versionTouched]);
 
   function toggleDevice(d) {
     const key = targetKey(d);
@@ -113,11 +139,19 @@ export function FirmwareUploadModal({ onClose, currentRelease, devices = [] }) {
       )}
 
       <div>
-        <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">เวอร์ชัน</p>
+        <div className="mb-1.5 flex items-center justify-between">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">เวอร์ชัน</p>
+          {liveVersion && (
+            <span className="text-[10px] text-[var(--muted-foreground)]">อุปกรณ์รายงานปัจจุบัน: v{liveVersion}</span>
+          )}
+        </div>
         <input
           type="text"
           value={version}
-          onChange={(e) => setVersion(e.target.value)}
+          onChange={(e) => {
+            setVersionTouched(true);
+            setVersion(e.target.value);
+          }}
           placeholder="เช่น 19.31"
           maxLength={40}
           className="w-full rounded-xl border border-[var(--border)] bg-[var(--muted)] px-3 py-2 text-sm text-[var(--foreground)] outline-none focus:border-[var(--brand)]"
