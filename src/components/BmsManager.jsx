@@ -257,7 +257,7 @@ const checkEspStatus = async (ip, device) => {
 
   // ใช้ Loop ซ้อน Loop เพื่อสแกนทุกวง
   for (const prefix of subnets) {
-    for (let i = 10; i <= 140; i++) {
+    for (let i = 10; i <= 250; i++) {
       const ip = `${prefix}.${i}`;
       
       scanPromises.push(
