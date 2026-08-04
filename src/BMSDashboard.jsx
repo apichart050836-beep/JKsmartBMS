@@ -18,6 +18,8 @@ import { SettingsPanel } from "./components/SettingsPanel.jsx";
 import { TopBar } from "./components/TopBar.jsx";
 import { Modal } from "./components/Modal.jsx";
 import { api } from "./lib/apiClient.js";
+import { useAuth } from "./context/AuthContext.jsx";
+import { LogoutModal } from "./components/LogoutModal";
 import { computeAlarms } from "./lib/alarms.js";
 import { computeBatteryHealthScore } from "./lib/batteryHealthScore.js";
 import { AlarmList } from "./components/AlarmList.jsx";
@@ -304,6 +306,7 @@ function Pill({ tone = "brand", icon: Icon, children }) {
 // ---------------------------------------------------------------------------
 
 export default function BMSDashboard({ onSoftwareVersionChange }) {
+  const { logout } = useAuth();
   const { hubs } = useHubData();
   const [now, setNow] = useState(new Date());
   const [showWeatherModal, setShowWeatherModal] = useState(false);
@@ -329,6 +332,7 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
   const [showLog, setShowLog] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
   const [showAlarms, setShowAlarms] = useState(false);
+  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
   const [saveError, setSaveError] = useState(null);
   // The only thing that's actually dynamic per render - which devices the
   // backend has reported for this session (already role-filtered
@@ -404,15 +408,11 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
   // Reports the active device's versions up to App.jsx, which renders the
   // Update badge/button next to the "Dashboard" nav pill (outside this
   // component) and its "check for update" popup - hardware_version is the
-  // real field for "BMS Version" (e.g. "15H"). "software" here is the
-  // ESP32's OWN firmware version (info.esp_firmware_version, written by the
-  // ESP32's own version text sensor) - info.software_version looks similar
-  // but is actually the JK BMS chip's own version, a mislabeling caught and
-  // fixed 2026-08-01 (was showing the wrong device's version as "ESP32
-  // Software").
+  // real field for "BMS Version" (e.g. "15H"), confirmed live alongside
+  // software_version on the same info node.
   useEffect(() => {
     onSoftwareVersionChange?.({
-      software: active.info?.esp_firmware_version ?? null,
+      software: active.info?.software_version ?? null,
       hardware: active.info?.hardware_version ?? null,
       deviceLabel: active.name,
       hubId: activeConfig.hubId ?? null,
@@ -422,7 +422,7 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
       firmware: active.firmware ?? null,
     });
   }, [
-    active.info?.esp_firmware_version,
+    active.info?.software_version,
     active.info?.hardware_version,
     active.name,
     active.firmware,
@@ -431,18 +431,18 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
     onSoftwareVersionChange,
   ]);
 
-  // ESP32 firmware version - real field (info.esp_firmware_version), same
+  // ESP32 firmware version - real field (info.software_version), same
   // object already used for battery_type elsewhere. There's no dedicated
   // "update in progress" field in Firebase, so a firmware update is
   // inferred the only way it's observable here: this specific device's
-  // own esp_firmware_version reading changing value between polls. Tracked
+  // own software_version reading changing value between polls. Tracked
   // per-slot (not globally) so switching to a device that just happens to
   // run a different version doesn't get mistaken for an update.
   const prevVersionsRef = useRef({});
   const [firmwareUpdate, setFirmwareUpdate] = useState(null);
   useEffect(() => {
     for (const pack of packs) {
-      const version = pack.info?.esp_firmware_version;
+      const version = pack.info?.software_version;
       if (!version) continue;
       const prev = prevVersionsRef.current[pack.id];
       if (prev !== undefined && prev !== version) {
@@ -716,33 +716,37 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
   //   backend (see HubDataContext.jsx's socket "connect"/"disconnect") -
   //   not a real Firebase presence path, just "is our own live-data
   //   channel up at all" (this name is a holdover from an earlier design).
-  // - fresh data: status genuinely changed within the last 20s. Confirmed
+  // - fresh data: status genuinely changed within the last 15s. Confirmed
   //   live (2026-07-27, BLE physically unplugged) that jkbms-bridge.yaml
   //   stops writing to Firebase entirely when the BLE link drops - the
   //   value freezes byte-for-byte rather than re-pushing on a heartbeat -
   //   so a real content change is the correct liveness signal here, not
-  //   "did our backend's poll deliver a message" (it always does, frozen
-  //   data included). This is purely the Offline-detection threshold -
-  //   the displayed values themselves still refresh as fast as the data
-  //   can move (see realtime.js's REST_POLL_MS).
-  //   20s - explicit request (2026-08-01), knowingly reduced from the
-  //   previous 90s. info.uptime_seconds itself still only advances in
-  //   ~60s jumps (confirmed live again at this same timestamp - that
-  //   hasn't changed), so this relies entirely on the `status` half of the
-  //   OR-logic below: live sampling showed status content changing on
-  //   almost every ~5-6s backend poll, which comfortably clears 20s in
-  //   practice. Residual risk: a device that's genuinely online but happens
-  //   to have every status field stay byte-identical for over 20s (fully
-  //   idle, no balancing, stable temps) will still flash Offline - accepted
-  //   tradeoff per this request. If false-Offline flicker returns, that's
-  //   the first thing to revisit.
-  const STALE_AFTER_MS = 20000;
+  //   "did our backend's 5s poll deliver a message" (it always does,
+  //   frozen data included). This is purely the Offline-detection
+  //   threshold - the displayed values themselves still refresh as fast
+  //   as the data can move: the backend polls Firebase every 5s
+  //   (realtime.js's REST_POLL_MS), matching jkbms-bridge.yaml's own ~5s
+  //   push cadence, so there's nothing more real-time to extract there.
+  //   90s: confirmed live (2026-07-28) that info.uptime_seconds only
+  //   actually changes in ~60s jumps (an ESPHome sensor on its own
+  //   60s update_interval, independent of the 5s Firebase push cadence),
+  //   and status can legitimately stay byte-identical for 40+s on a
+  //   genuinely connected but numerically-stable device (idle SOC, steady
+  //   current). A shorter threshold was flipping Online devices to Offline
+  //   just because neither signal happened to move within the window, not
+  //   because the device was actually gone - 90s comfortably clears that
+  //   ~60s quantization with margin for poll jitter. A tighter threshold
+  //   than this isn't achievable from content-diffing alone without the
+  //   ESP32 itself writing a real per-push heartbeat field, which is out
+  //   of scope (ESP32 firmware/protocol changes weren't requested).
+  // ลดเวลาเหลือ 15 วินาที (ถ้าเกิน 15s ไม่ส่งข้อมูล ให้ Offline ทันที)
+const STALE_AFTER_MS = 15000; 
 
-  const isOnline = active.isLive
-    ? !!active.firebaseConnected &&
-      !!active.lastUpdateAt &&
-      now.getTime() - active.lastUpdateAt < STALE_AFTER_MS
-    : false; // ถ้าไม่ใช่ Live Data ให้ default เป็น Offline (false)
+const isOnline = active.isLive
+  ? !!active.firebaseConnected &&
+    !!active.lastUpdateAt &&
+    (now.getTime() - active.lastUpdateAt < STALE_AFTER_MS)
+  : false; // ถ้าไม่ใช่ Live Data ให้ default เป็น Offline (false)
 
   // Auto-pops when the active pack goes offline, asking the user to
   // refresh - but only after 5s of SUSTAINED offline, not the instant
@@ -805,8 +809,14 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
           }}
           onOpenConfig={() => setShowConfig(true)}
           configDisabled={active.isLive && active.adminDisabled}
+          onLogout={() => setIsLogoutModalOpen(true)}
         />
         <AnnouncementBanner />
+        <LogoutModal
+            isOpen={isLogoutModalOpen}
+            onClose={() => setIsLogoutModalOpen(false)}
+            onConfirm={logout}
+        />
         {active.isLive && active.adminDisabled ? (
           <div className="mt-5 flex flex-col items-center justify-center gap-2 rounded-3xl bg-[var(--card)] p-16 text-center shadow-sm ring-1 ring-[var(--border)]">
             <p className="text-lg font-bold text-[var(--foreground)]">ถูกปิดโดย Admin</p>

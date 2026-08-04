@@ -14,6 +14,7 @@ import {
   Bluetooth,
   Radio,
   PlusCircle,
+  BatteryCharging
 } from "lucide-react";
 import { ESPLoader, Transport } from "esptool-js";
 import { BrowserRouter } from "react-router-dom";
@@ -28,6 +29,7 @@ import { ThemeProvider } from "./context/ThemeContext.jsx";
 import { AuthProvider, useAuth } from "./context/AuthContext.jsx";
 import { HubDataProvider, useHubData } from "./context/HubDataContext.jsx";
 import { LogoutModal } from "./components/LogoutModal.jsx";
+
 
 // ตัวเลือกชิปประมวลผลที่รองรับ
 const CHIP_OPTIONS = [
@@ -67,7 +69,38 @@ function ESPFirmwareInstaller() {
   const logContainerRef = useRef(null);
 
   const currentChipConfig = CHIP_OPTIONS.find((c) => c.id === selectedChip) || CHIP_OPTIONS[0];
+ 
+ const waitForIpAddress = (timeout) => {
+  return new Promise((resolve) => {
+    const startTime = Date.now();
+    
+    // ตั้งค่า Interval เช็คทุก 3 วินาที
+    const interval = setInterval(async () => {
+      // 1. เช็ค Timeout
+      if (Date.now() - startTime > timeout) {
+        clearInterval(interval);
+        console.log("❌ หมดเวลาคอย IP!");
+        resolve(null);
+        return;
+      }
 
+      try {
+        // --- เพิ่ม Log ตรงนี้เพื่อดูว่ามันพยายามเชื่อมต่อจริงไหม ---
+        console.log("🔍 กำลังพยายามเช็ค IP จาก ESP32...");
+        
+        const response = await fetchDeviceStatus(); 
+        
+        if (response && response.ip && response.ip !== "0.0.0.0") {
+          clearInterval(interval);
+          console.log("✅ พบ IP แล้ว:", response.ip);
+          resolve(response.ip);
+        }
+      } catch (err) {
+        console.log("⚠️ ยังไม่เจอการตอบกลับจาก ESP32 (ปกติถ้ากำลังรีบูต)...");
+      }
+    }, 3000); 
+  });
+};
   // 📌 เลื่อน Scrollbar ลงด้านล่างสุดอัตโนมัติเมื่อมี Log เพิ่ม
   useEffect(() => {
     if (logContainerRef.current) {
@@ -93,26 +126,71 @@ function ESPFirmwareInstaller() {
 
   // 🔄 ลำดับเหตุการณ์ติดตามสถานะหลัง Flash
   const trackPostFlashSequence = async () => {
+   try {
     appendLog("--------------------------------------------------");
+    
+    // --- Step 1: Reboot ---
     appendLog("🔄 [1/3] กำลังรีบูตอุปกรณ์ ESP32...");
     setConnectionState("disconnected");
     setBleStatus("Rebooting...");
     setDeviceIp("—");
 
-    // ขั้นที่ 1: ตรวจจับ AP Mode
+    // รออุปกรณ์ Reboot
     await new Promise((resolve) => setTimeout(resolve, 15000));
+
+    // --- Step 2: AP Mode ---
+    appendLog("📶 [2/3] เข้าสู่โหมด AP...");
     setConnectionState("ap_mode");
-    setDeviceIp("—"); 
-    appendLog("📶 [2/3] โปรดเลือก AP Hotspot 'ESPHome-Setup' และเชื่อมต่อ Wi-Fi 2.4G ของคุณ");
+    setBleStatus("AP Mode Active");
+    await new Promise((resolve) => setTimeout(resolve, 55000));
+    appendLog("📶 โปรดเลือก AP Hotspot 'ESPHome-Setup' และตั้งค่า Wi-Fi 2.4G ของคุณ");
 
-    // ขั้นที่ 2: รอฟัง IP จริงผ่าน Serial Log (หรือหากไม่มี IP ใหม่เข้ามาใน 5 วินาที ระบบจะแจ้งเตือนให้ตั้งค่า Wi-Fi)
-    appendLog("🌐 [3/3] กำลังรอรับ IP Address จริงจาก Wi-Fi Router ผ่าน Serial Stream...");
+    // --- Step 3: Wait for IP ---
+    appendLog("🌐 [3/3] กำลังรอรับ IP Address จาก Wi-Fi...");
     
-    await new Promise((resolve) => setTimeout(resolve, 50000));
+    // ตั้งค่า Timeout ไว้ 50 วินาทีตามที่คุณกำหนด
+    const ipReceived = await waitForIpAddress(250000); 
 
- 
+    if (ipReceived) {
+      setConnectionState("connected");
+      setDeviceIp(ipReceived);
+      appendLog(`✅ เชื่อมต่อสำเร็จ! IP: ${ipReceived}`);
+
+      rebootESP(); // รีบูตอุปกรณ์หลังจากเชื่อมต่อสำเร็จ
+
+    } else {
+      setConnectionState("error");
+      appendLog("❌ ไม่พบ IP Address ภายในเวลาที่กำหนด กรุณาตรวจสอบ Wi-Fi อีกครั้ง");
+      rebootESP();
+    }
+
+  } catch (error) {
+    appendLog(`⚠️ เกิดข้อผิดพลาดในระบบ: ${error.message}`);
+    setConnectionState("error");
+  } finally {
     appendLog("--------------------------------------------------");
+  }
   };
+
+  const rebootESP = async () => {
+  try {
+    appendLog("🔄 กำลังส่งคำสั่ง Reboot ไปยัง ESP32...");
+    
+    // เปลี่ยน URL ให้ตรงกับ IP ของ ESP32 หรือ Endpoint ของคุณ
+    const response = await fetch('http://' + deviceIp + '/reboot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    if (response.ok) {
+      appendLog("✅ ส่งคำสั่ง Reboot เรียบร้อยแล้ว");
+    } else {
+      appendLog("⚠️ การส่งคำสั่ง Reboot ล้มเหลว");
+    }
+  } catch (error) {
+    appendLog(`❌ ไม่สามารถติดต่อ ESP32 เพื่อ Reboot ได้: ${error.message}`);
+  }
+};
 
   const handleStartFlashing = async () => {
     if (!("serial" in navigator)) {
@@ -260,7 +338,8 @@ function ESPFirmwareInstaller() {
     }
   };
 
-  return (
+
+ return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between rounded-xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-sm">
@@ -501,8 +580,9 @@ function UserMenu({ user }) {
 const PAGES = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, userOnly: true },
   { id: "admin", label: "Admin Monitor", icon: ShieldCheck, adminOnly: true },
+  { id: "install-firmware", label: "ติดตั้ง Firmware", icon: Download },
   { id: "bms-manager", label: "เพิ่มอุปกรณ์", icon: PlusCircle },
-  { id: "install-firmware", label: "Install Firmware", icon: Download },
+  
 ];
 
 function AuthedApp() {
@@ -510,24 +590,36 @@ function AuthedApp() {
   const defaultPage = user.role === "admin" ? "admin" : "dashboard";
   const [page, setPage] = useState(defaultPage);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [showDeviceMenu, setShowDeviceMenu] = useState(false); // State สำหรับควบคุมการเปิด/ปิด Dropdown
 
   const pages = PAGES.filter(
     (p) => (p.adminOnly ? user.role === "admin" : !p.userOnly || user.role !== "admin")
   );
+  
+  // แยกหน้าปกติทั่วไปออกจากกลุ่มเมนูจัดการอุปกรณ์
+  const mainPages = pages.filter(
+    (p) => p.id !== "bms-manager" && p.id !== "install-firmware"
+  );
+  
+  const isDevicePage = page === "bms-manager" || page === "install-firmware";
   const activePage = pages.find((p) => p.id === page) ? page : defaultPage;
 
   return (
     <HubDataProvider>
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-1 px-3 pt-4 sm:px-5 md:px-7">
         <div className="flex items-center gap-1">
-          {pages.map((p) => {
+          {/* เรนเดอร์เมนูหลักปกติ */}
+          {mainPages.map((p) => {
             const Icon = p.icon;
             const active = p.id === activePage;
             return (
               <button
                 key={p.id}
                 type="button"
-                onClick={() => setPage(p.id)}
+                onClick={() => {
+                  setPage(p.id);
+                  setShowDeviceMenu(false);
+                }}
                 className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
                   active
                     ? "bg-[var(--brand-10)] text-[var(--brand)]"
@@ -539,13 +631,75 @@ function AuthedApp() {
               </button>
             );
           })}
+
+          {/* เมนูดรอปดาวน์ "ติดตั้งและเพิ่มอุปกรณ์" */}
+          {pages.some((p) => p.id === "bms-manager" || p.id === "install-firmware") && (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setShowDeviceMenu(!showDeviceMenu)}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  isDevicePage
+                    ? "bg-[var(--brand-10)] text-[var(--brand)]"
+                    : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                }`}
+              >
+                {/* คุณสามารถเปลี่ยน Icon ตามต้องการ ตรงนี้ใช้ตัวอย่างแทน */}
+                <span className="size-3.5 flex items-center justify-center">+</span>
+                ติดตั้งและเพิ่มอุปกรณ์
+                <svg
+                  className={`size-3 transition-transform duration-200 ${showDeviceMenu ? "rotate-180" : ""}`}
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+
+              {/* รายการ List เมนูดรอปดาวน์ย่อย */}
+              {showDeviceMenu && (
+                <div className="absolute left-0 mt-1 w-48 rounded-xl bg-[var(--card)] p-1 shadow-lg ring-1 ring-[var(--border)] z-50">
+                  {pages.find((p) => p.id === "bms-manager") && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPage("bms-manager");
+                        setShowDeviceMenu(false);
+                      }}
+                      className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
+                        page === "bms-manager"
+                          ? "bg-[var(--brand-10)] text-[var(--brand)]"
+                          : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+                      }`}
+                    >
+                      จัดการอุปกรณ์
+                    </button>
+                  )}
+                  {pages.find((p) => p.id === "install-firmware") && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPage("install-firmware");
+                        setShowDeviceMenu(false);
+                      }}
+                      className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
+                        page === "install-firmware"
+                          ? "bg-[var(--brand-10)] text-[var(--brand)]"
+                          : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+                      }`}
+                    >
+                      ติดตั้งเฟิร์มแวร์
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
+
         <div className="flex items-center gap-2">
           <UserMenu user={user} />
-          {/* Moved next to UserMenu and now shown on every page (was
-              hidden on Dashboard before, since BMSDashboard/TopBar.jsx
-              used to render its own separate Logout button + modal there -
-              removed in favor of this single one, per explicit request). */}
           <button
             type="button"
             onClick={() => setShowLogoutModal(true)}
