@@ -113,6 +113,7 @@ export function AdminStatusPreview({ path }) {
   if (data == null) return <p className="text-sm text-amber-500">Connected, but this path returned nothing.</p>;
 
   const status = data.status ?? {};
+  const settings = data.settings ?? {};
   const power = pick(status, "power", "battery_power") ?? 0;
   const current = pick(status, "current", "charge_current") ?? 0;
   const packVoltage = pick(status, "totalVoltage", "battery_voltage") ?? 0;
@@ -121,7 +122,10 @@ export function AdminStatusPreview({ path }) {
   // Charge ON/OFF badge reads charging_state directly, per explicit
   // instruction (see useBmsPackLive.js's matching comment/revert).
   const chargeMOS = !!pick(status, "charging_state", "charge");
-  const dischargeMOS = !!status.discharge;
+  // status.discharge never actually exists on a real device - see the
+  // matching fix/comment in useBmsPackLive.js. settings.discharge is the
+  // real field.
+  const dischargeMOS = !!(status.discharge ?? settings.discharge);
   const statusLabel = isCharging ? "Charging" : isDischarging ? "Discharging" : "Idle";
   const currentTone = isCharging ? "emerald" : isDischarging ? "amber" : "zinc";
   const soc = pick(status, "soc", "percent_remain") ?? 0;

@@ -146,7 +146,13 @@ export function useBmsPackLive(config) {
   // by request). chargeStatus (Bulk/Absorption/Float) still rides along as
   // supplementary info alongside ON/OFF.
   const chargeMOS = !!pick(status, "charging_state", "charge");
-  const dischargeMOS = !!status.discharge;
+  // status.discharge never actually exists on any real device (confirmed
+  // live against Firebase - status only ever has charging_state, no
+  // discharge/discharging_state counterpart), so this always read as OFF
+  // regardless of the pack's real state. settings.discharge is the real
+  // field that carries this (synced from the BMS by the ESP32, same as the
+  // Settings panel's Discharge toggle reads/writes).
+  const dischargeMOS = !!(status.discharge ?? remoteSettings?.discharge);
   const chargeStatus = status.charge_status ?? null;
 
   const ratedCapacityAh = status.nominal_capacity || fallbackCapacityAh;
