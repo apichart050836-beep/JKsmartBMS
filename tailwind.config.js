@@ -19,10 +19,15 @@ export default {
           "0%": { backgroundPosition: "-200% 0" },
           "100%": { backgroundPosition: "200% 0" },
         },
+        "fade-in-up": {
+          "0%": { opacity: "0", transform: "translateY(6px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
       },
       animation: {
         "flow-in": "flow-in 1.5s linear infinite",
         "flow-out": "flow-out 1.5s linear infinite",
+        "fade-in-up": "fade-in-up 0.4s ease-out",
       },
     },
   },

@@ -82,6 +82,18 @@ function LegendDot({ color, label }) {
   );
 }
 
+function StatChip({ color, label, value }) {
+  return (
+    <div className="flex min-w-[7.5rem] flex-1 items-center gap-2 rounded-xl bg-[var(--muted)] px-3 py-2">
+      <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />
+      <div className="min-w-0">
+        <p className="text-[10px] font-medium text-[var(--muted-foreground)]">{label}</p>
+        <p className="truncate text-xs font-bold tabular-nums text-[var(--foreground)]">{value}</p>
+      </div>
+    </div>
+  );
+}
+
 function AreaTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
   // charge/discharge are now both always-present positive-or-zero magnitudes
@@ -303,6 +315,42 @@ export function ChargeDischargeChart({ history = [], hubId, bmsKey }) {
   const fillId = `fill-${gradientId}`;
   const strokeId = `stroke-${gradientId}`;
 
+  // Peak charge/discharge moments for the daily view's stat strip - highest
+  // magnitude reading in either direction, plus the clock time it happened
+  // at. null when there's nothing on that side yet (e.g. a day that's only
+  // ever discharged so far).
+  const dailyPeaks = useMemo(() => {
+    if (view !== "daily") return null;
+    let peakCharge = null;
+    let peakDischarge = null;
+    for (const d of areaSource) {
+      if (d.current > 0 && (!peakCharge || d.current > peakCharge.current)) peakCharge = d;
+      if (d.current < 0 && (!peakDischarge || d.current < peakDischarge.current)) peakDischarge = d;
+    }
+    return { peakCharge, peakDischarge };
+  }, [view, areaSource]);
+
+  // Same real energy totals the backend already computes (see history.js's
+  // bucketEnergy) - daily reuses the single-day totals it already fetched,
+  // monthly/yearly sum the bars currently on screen so it always matches
+  // exactly what's drawn, real or (clearly labeled) mock.
+  const periodTotals = useMemo(() => {
+    if (view === "daily") {
+      if (!hasRealDaily || !daily?.totals) return null;
+      return { chargedAh: daily.totals.chargedAh, dischargedAh: daily.totals.dischargedAh };
+    }
+    return {
+      chargedAh: barData.reduce((sum, d) => sum + (d.charged || 0), 0),
+      dischargedAh: barData.reduce((sum, d) => sum + Math.abs(d.discharged || 0), 0),
+    };
+  }, [view, hasRealDaily, daily, barData]);
+
+  // Stable key that changes exactly when the visible period does (view, or
+  // the specific date/month/year) - remounting the chart on this key is
+  // what makes the entrance animation reliably replay on every switch,
+  // instead of depending on recharts' own update-transition timing.
+  const periodKey = `${view}-${view === "daily" ? toDateStr(cursor) : view === "monthly" ? toMonthStr(cursor) : cursor.getFullYear()}`;
+
   return (
     <section className="rounded-2xl bg-[var(--card)] p-5 shadow-sm ring-1 ring-[var(--border)] md:p-6">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -372,7 +420,32 @@ export function ChargeDischargeChart({ history = [], hubId, bmsKey }) {
         )
       )}
 
-      <div className="h-56 w-full">
+      {/* Highlight strip - only for real data, never built from MOCK_DATA/
+          mockBarSeries (those numbers are illustrative, not worth
+          summarizing as if real). Keyed with the chart below so both fade
+          in together on every view/date switch. */}
+      {!loading && !isAreaMock && !isBarMock && periodTotals && (
+        <div key={`stats-${periodKey}`} className="mb-3 flex flex-wrap gap-2 animate-fade-in-up">
+          {view === "daily" && dailyPeaks?.peakCharge && (
+            <StatChip
+              color={CHARGE_COLOR}
+              label="ชาร์จสูงสุด"
+              value={`${dailyPeaks.peakCharge.current.toFixed(1)} A · ${dailyPeaks.peakCharge.time}`}
+            />
+          )}
+          {view === "daily" && dailyPeaks?.peakDischarge && (
+            <StatChip
+              color={DISCHARGE_COLOR}
+              label="ดิสชาร์จสูงสุด"
+              value={`${Math.abs(dailyPeaks.peakDischarge.current).toFixed(1)} A · ${dailyPeaks.peakDischarge.time}`}
+            />
+          )}
+          <StatChip color={CHARGE_COLOR} label="รวมชาร์จ" value={`${periodTotals.chargedAh.toFixed(1)} Ah`} />
+          <StatChip color={DISCHARGE_COLOR} label="รวมดิสชาร์จ" value={`${periodTotals.dischargedAh.toFixed(1)} Ah`} />
+        </div>
+      )}
+
+      <div key={periodKey} className="h-56 w-full animate-fade-in-up">
         <ResponsiveContainer width="100%" height="100%">
           {view === "daily" ? (
             <AreaChart data={areaData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
