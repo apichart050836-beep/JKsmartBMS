@@ -739,8 +739,8 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
   //   than this isn't achievable from content-diffing alone without the
   //   ESP32 itself writing a real per-push heartbeat field, which is out
   //   of scope (ESP32 firmware/protocol changes weren't requested).
-  // ลดเวลาเหลือ 15 วินาที (ถ้าเกิน 15s ไม่ส่งข้อมูล ให้ Offline ทันที)
-const STALE_AFTER_MS = 15000; 
+  // เพิ่มเป็น 1 นาที (ถ้าเกิน 60s ไม่ส่งข้อมูล ให้ Offline ทันที) ตามคำขอ
+const STALE_AFTER_MS = 60000;
 
 const isOnline = active.isLive
   ? !!active.firebaseConnected &&

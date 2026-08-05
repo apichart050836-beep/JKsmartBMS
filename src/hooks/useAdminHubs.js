@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useHubData } from "../context/HubDataContext.jsx";
 import { flattenHubs } from "../lib/flattenHubs.js";
 
-const STALE_AFTER_MS = 20000; // matches BMSDashboard's per-device Online/Offline threshold
+const STALE_AFTER_MS = 60000; // matches BMSDashboard's per-device Online/Offline threshold
 
 /**
  * Fleet-wide view of every hub (and every BMS nested under it) visible to
