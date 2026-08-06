@@ -9,7 +9,6 @@ import { InstallationLocationModal } from "./components/InstallationLocationModa
 import { WeatherModal } from "./components/WeatherModal.jsx";
 import { DetailedLog } from "./components/DetailedLog.jsx";
 import { SystemHero } from "./components/SystemHero.jsx";
-import { SensorRow } from "./components/SensorRow.jsx";
 import { CommunicationPanel } from "./components/CommunicationPanel.jsx";
 import { PowerFlowChart } from "./components/PowerFlowChart.jsx";
 import { ChargeDischargeChart } from "./components/ChargeDischargeChart.jsx";
@@ -751,12 +750,7 @@ const loadConsumptionPower = totalPower < 0 ? Math.abs(totalPower) : 0;
 
                 <div className="mt-5 space-y-5">
                   <PowerFlowChart
-                    packVoltage={active.packVoltage}
                     current={active.current}
-                    chargedAh={activeEnergy.chargedAh}
-                    dischargedAh={activeEnergy.dischargedAh}
-                    chargedWh={dailyEnergy.chargedWh}
-                    dischargedWh={dailyEnergy.dischargedWh}
                     socPercent={displaySoc}
                     remainingRuntime={active.remainingRuntime}
                     timeToFullCharge={active.timeToFullCharge}
@@ -765,11 +759,6 @@ const loadConsumptionPower = totalPower < 0 ? Math.abs(totalPower) : 0;
                     configuredChargeCurrentA={settings.contChgCurr}
                     configuredDischargeCurrentA={settings.contDsgCurr}
                     history={active.powerHistory}
-                  />
-                </div>
-
-                <div className="mt-5 space-y-5">
-                  <SensorRow
                     channels={active.tempChannels}
                     temps={active.temps}
                     maxTemp={active.maxTemp}
@@ -777,7 +766,9 @@ const loadConsumptionPower = totalPower < 0 ? Math.abs(totalPower) : 0;
                     cycleAh={active.cycleAh}
                     cycleCount={active.cycleCount}
                   />
+                </div>
 
+                <div className="mt-5 space-y-5">
                   <section className="rounded-3xl bg-[var(--card)] p-5 shadow-sm ring-1 ring-[var(--border)] md:p-6">
                     <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
                       <div>
