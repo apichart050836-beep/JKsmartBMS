@@ -559,44 +559,73 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
 
                       if (isChargingActive) {
                         // กำลังชาร์จเข้า (วิ่งย้อนเข้าแบต)
-                        batteryAnimationValue = "dash_reverse 1.5s linear infinite"; 
-                        batteryStrokeColor = "#38bdf8"; 
+                        batteryAnimationValue = "dash_reverse 2.2s linear infinite";
+                        batteryStrokeColor = "#38bdf8";
                       } else if (isDischargingActive || !isChargingActive) {
                         // กำลังจ่ายออก (วิ่งออกจากแบตมาอินเวอร์เตอร์)
-                        batteryAnimationValue = "dash_forward 1.5s linear infinite"; 
-                        batteryStrokeColor = "#2dd4bf"; 
+                        batteryAnimationValue = "dash_forward 2.2s linear infinite";
+                        batteryStrokeColor = "#2dd4bf";
                       }
+
+                      // Three distinct ports on the Inverter box (top, right,
+                      // bottom) instead of all three routes converging on the
+                      // same single point - that was making the Solar-in and
+                      // Loads-out lines visually overlap right at the
+                      // Inverter. 45-degree chamfered corners (not rounded
+                      // curves) for a crisper, more deliberate "circuit
+                      // trace" look, per explicit request for something more
+                      // high-tech - the round traveling dots already carry
+                      // the "smooth" part.
+                      const SOLAR_PATH = "M 480 130 L 480 185 L 460 205 L 250 205";
+                      const BATTERY_PATH = "M 310 520 L 250 520 L 220 490 L 220 285";
+                      const LOADS_PATH = "M 250 260 L 420 260 L 450 290 L 650 300";
 
                       return (
                         <svg className="absolute inset-0 w-full h-full pointer-events-none z-10 filter drop-shadow-[0_0_8px_rgba(56,189,248,0.4)]" viewBox="0 0 1000 600" preserveAspectRatio="none">
-                          {/* 1. Solar PV Array -> Hybrid Inverter */}
+                          {/* Faint solid guide line under the dots so each
+                              route still reads clearly in the gaps between
+                              dots, not just wherever a dot happens to be. */}
+                          <path d={SOLAR_PATH} fill="none" stroke="#fbbf24" strokeWidth="1.5" strokeLinejoin="round" opacity={isSolarFlowing ? 0.25 : 0.08} />
+                          <path d={BATTERY_PATH} fill="none" stroke={batteryStrokeColor} strokeWidth="1.5" strokeLinejoin="round" opacity={0.25} />
+                          <path d={LOADS_PATH} fill="none" stroke="#fb923c" strokeWidth="1.5" strokeLinejoin="round" opacity={0.25} />
+
+                          {/* 1. Solar PV Array -> Hybrid Inverter - round
+                              marching dots (near-zero dash + round linecap)
+                              instead of dash segments, per explicit request. */}
                           <path
-                            d="M 480 130 L 480 230 L 280 230"
+                            d={SOLAR_PATH}
                             fill="none"
                             stroke="#fbbf24"
-                            strokeWidth="5"
-                            strokeDasharray="12 12"
-                            style={{ animation: isSolarFlowing ? "dash_forward 2s linear infinite" : "none", opacity: isSolarFlowing ? 0.9 : 0.15 }}
+                            strokeWidth="7"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeDasharray="0.1 20"
+                            style={{ animation: isSolarFlowing ? "dash_forward 2.2s linear infinite" : "none", opacity: isSolarFlowing ? 0.95 : 0.15 }}
                           />
 
                           {/* 2. Battery Bank <-> Inverter */}
                           <path
-                            d="M 310 520 Q 220 520, 220 400 L 220 280"
+                            d={BATTERY_PATH}
                             fill="none"
                             stroke={batteryStrokeColor}
-                            strokeWidth="5"
-                            strokeDasharray="12 12"
-                            style={{ animation: batteryAnimationValue, opacity: 0.9 }}
+                            strokeWidth="7"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeDasharray="0.1 20"
+                            style={{ animation: batteryAnimationValue, opacity: 0.95 }}
                           />
 
-                          {/* 3. Inverter -> Home Load */}
+                          {/* 3. Inverter -> Home Load - same round-dot
+                              treatment as path 1. */}
                           <path
-                            d="M 280 230 L 450 230 L 650 300"
+                            d={LOADS_PATH}
                             fill="none"
                             stroke="#fb923c"
-                            strokeWidth="5"
-                            strokeDasharray="12 12"
-                            style={{ animation: isLoadFlowing ? "dash_forward 2s linear infinite" : "none", opacity: 0.9 }}
+                            strokeWidth="7"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeDasharray="0.1 20"
+                            style={{ animation: isLoadFlowing ? "dash_forward 2.2s linear infinite" : "none", opacity: 0.95 }}
                           />
                         </svg>
                       );
@@ -702,15 +731,19 @@ const loadConsumptionPower = totalPower < 0 ? Math.abs(totalPower) : 0;
 
                 </div>
 
-                {/* Keyframes */}
+                {/* Keyframes - dashoffset travels exactly 2x the 12+12
+                    dash pattern (24) per cycle, not 50, so the "marching"
+                    loop is seamless instead of visibly hitching every
+                    repeat - dots use a 0.1+20=20.1 pattern (2x = 40.2),
+                    the earlier dashed version used 12+12=24 (2x = 48). */}
                 <style>{`
                   @keyframes dash_forward {
-                    from { stroke-dashoffset: 50; }
+                    from { stroke-dashoffset: 40.2; }
                     to { stroke-dashoffset: 0; }
                   }
                   @keyframes dash_reverse {
                     from { stroke-dashoffset: 0; }
-                    to { stroke-dashoffset: 50; }
+                    to { stroke-dashoffset: 40.2; }
                   }
                 `}</style>
               </div>
