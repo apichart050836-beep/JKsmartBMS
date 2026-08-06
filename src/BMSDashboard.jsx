@@ -333,6 +333,29 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
 
   const dailyEnergy = useDailyEnergy(activeConfig.hubId, activeConfig.bmsKey);
   const activeEnergy = { chargedAh: dailyEnergy.chargedAh, dischargedAh: dailyEnergy.dischargedAh };
+
+  // Same unrolled-per-slot pattern as bms0..bms9 above (hooks can't be
+  // called in a loop) - fleet-wide today's charged Ah/Wh across every real
+  // device, for the Solar Hybrid Energy Flow panel's "Net Battery Power"
+  // readout, per explicit request ("คำนวนการชาร์จลงแบตทั้งหมด"). Empty
+  // slots (hubId null) resolve to EMPTY immediately inside the hook itself,
+  // so this doesn't add real fetch load beyond however many devices exist.
+  const dailyEnergy0 = useDailyEnergy(slots[0].hubId, slots[0].bmsKey);
+  const dailyEnergy1 = useDailyEnergy(slots[1].hubId, slots[1].bmsKey);
+  const dailyEnergy2 = useDailyEnergy(slots[2].hubId, slots[2].bmsKey);
+  const dailyEnergy3 = useDailyEnergy(slots[3].hubId, slots[3].bmsKey);
+  const dailyEnergy4 = useDailyEnergy(slots[4].hubId, slots[4].bmsKey);
+  const dailyEnergy5 = useDailyEnergy(slots[5].hubId, slots[5].bmsKey);
+  const dailyEnergy6 = useDailyEnergy(slots[6].hubId, slots[6].bmsKey);
+  const dailyEnergy7 = useDailyEnergy(slots[7].hubId, slots[7].bmsKey);
+  const dailyEnergy8 = useDailyEnergy(slots[8].hubId, slots[8].bmsKey);
+  const dailyEnergy9 = useDailyEnergy(slots[9].hubId, slots[9].bmsKey);
+  const fleetDailyEnergies = [
+    dailyEnergy0, dailyEnergy1, dailyEnergy2, dailyEnergy3, dailyEnergy4,
+    dailyEnergy5, dailyEnergy6, dailyEnergy7, dailyEnergy8, dailyEnergy9,
+  ];
+  const fleetChargedAhToday = fleetDailyEnergies.reduce((sum, e) => sum + (e.chargedAh || 0), 0);
+  const fleetChargedWhToday = fleetDailyEnergies.reduce((sum, e) => sum + (e.chargedWh || 0), 0);
   const activeAlarms = computeAlarms(active, settings);
   const activeDeviceMac = active.info?.jk_mac_address || activeConfig.deviceKey;
   const activeDeviceLabel = settings.myCustomName || activeDeviceMac;
@@ -498,7 +521,7 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
             ) : (
               <>
             {/* 🌟 Background Flow Diagram Container (Pro Control Room Edition พร้อมปุ่มพับซ่อน) */}
-              <div className="my-6 relative w-full mx-auto overflow-hidden bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 rounded-3xl border border-slate-800/80 shadow-2xl p-5 md:p-6 ring-1 ring-slate-800/50">
+              <div className="flow-diagram-font my-6 relative w-full mx-auto overflow-hidden bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 rounded-3xl border border-slate-800/80 shadow-2xl p-5 md:p-6 ring-1 ring-slate-800/50">
                 
                 {/* Ambient Glow Background Accents */}
                 <div className="absolute -top-24 -left-24 w-72 h-72 bg-sky-500/10 rounded-full blur-3xl pointer-events-none"></div>
@@ -676,7 +699,7 @@ const loadConsumptionPower = totalPower < 0 ? Math.abs(totalPower) : 0;
                             </div>
                             
                             <div className="text-xs sm:text-base font-extrabold text-white font-mono tracking-tight my-0.5">
-                              {displaySoc.toFixed(0)}% 
+                              {aggregatedSoc.toFixed(0)}%
                               <span className="text-[9px] sm:text-xs text-slate-400 font-normal ml-0.5 sm:ml-1">
                                 ({totalRemainingAh.toFixed(1)}/{totalCapacityAh.toFixed(0)}Ah)  
                                  <div className="inline-block px-1.5 py-0.5 rounded bg-teal-500/10 border border-teal-500/20 text-[10px] sm:text-[11px] font-bold text-teal-300 font-mono">
@@ -708,6 +731,9 @@ const loadConsumptionPower = totalPower < 0 ? Math.abs(totalPower) : 0;
                       <div>
                         <div className="text-[11px] font-medium text-slate-400">Net Battery Power</div>
                         <div className="text-sm font-bold text-teal-400 font-mono mt-0.5">{totalAggregatedPower.toFixed(0)} W</div>
+                        <div className="text-[10px] text-slate-500 font-mono mt-0.5">
+                          {fleetChargedAhToday.toFixed(1)} Ah · {(fleetChargedWhToday / 1000).toFixed(2)} kWh
+                        </div>
                       </div>
                       <div className="p-2 rounded-xl bg-teal-500/10 text-teal-400 border border-teal-500/20 text-base">🔋</div>
                     </div>
@@ -737,6 +763,21 @@ const loadConsumptionPower = totalPower < 0 ? Math.abs(totalPower) : 0;
                     repeat - dots use a 0.1+20=20.1 pattern (2x = 40.2),
                     the earlier dashed version used 12+12=24 (2x = 48). */}
                 <style>{`
+                  /* Scoped to this panel only (via .flow-diagram-font) so it
+                     never touches font-mono/uppercase-label styling used
+                     anywhere else in the app - a proper monospace (JetBrains
+                     Mono) for the numeric readouts and a condensed
+                     tech/HUD-style face (Rajdhani) for the uppercase labels,
+                     instead of falling back to whatever generic system
+                     monospace/sans-serif the browser has, per explicit
+                     "font isn't pretty" feedback. */
+                  .flow-diagram-font .font-mono {
+                    font-family: 'JetBrains Mono', ui-monospace, monospace;
+                  }
+                  .flow-diagram-font .uppercase {
+                    font-family: 'Rajdhani', sans-serif;
+                    letter-spacing: 0.08em;
+                  }
                   @keyframes dash_forward {
                     from { stroke-dashoffset: 40.2; }
                     to { stroke-dashoffset: 0; }
