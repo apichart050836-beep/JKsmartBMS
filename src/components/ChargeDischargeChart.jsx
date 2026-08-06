@@ -34,7 +34,7 @@ const MOCK_DATA = [
   { time: "22:00", hour: 22, current: -3.9 },
 ];
 
-const CHARGE_COLOR = "#8b5cf6";
+const CHARGE_COLOR = "#10b981";
 const DISCHARGE_COLOR = "#f97316";
 
 // Same illustrative purpose as MOCK_DATA above, but shaped for the bar

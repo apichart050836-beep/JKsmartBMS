@@ -178,7 +178,7 @@ export function PowerFlowChart({
                         {typeof recommendedChargeCurrentA === "number" && (
                             <div className="flex justify-between text-[11px] text-[var(--muted-foreground)]">
                                 <span>แนะนำชาร์จไม่เกิน (0.25C)</span>
-                                <span className="font-semibold text-[var(--brand)] tabular-nums">
+                                <span className="font-semibold text-emerald-500 tabular-nums">
                                     {recommendedChargeCurrentA.toFixed(1)} A
                                 </span>
                             </div>
@@ -186,13 +186,19 @@ export function PowerFlowChart({
                         {typeof configuredChargeCurrentA === "number" && (
                             <div className="flex justify-between text-[11px] text-[var(--muted-foreground)]">
                                 <span>ค่าชาร์จที่ตั้งไว้</span>
-                                <span className="font-semibold text-[var(--brand)] tabular-nums">
+                                <span className="font-semibold text-emerald-500 tabular-nums">
                                     {configuredChargeCurrentA.toFixed(1)} A
                                 </span>
                             </div>
                         )}
                     </div>
                 </div>
+            </div>
+
+            {/* Illustrative system diagram, per explicit request. */}
+            <div className="mt-5 rounded-xl bg-[var(--card)] p-3 ring-1 ring-[var(--border)]">
+                <p className="mb-2 text-xs font-semibold text-[var(--muted-foreground)]">Solar Hybrid Energy Flow</p>
+                <img src="/images/flow-main.jpg" alt="Solar Hybrid Energy Flow diagram" className="w-full rounded-lg" />
             </div>
         </section>
     );
