@@ -2,10 +2,14 @@ import React, { useEffect, useState } from "react";
 import { Cpu, RefreshCw, CheckCircle2, AlertTriangle } from "lucide-react";
 
 /**
- * "Check for update" popup opened from the version badge next to the
- * Dashboard pill. Shows the live-reported ESP32 (software) and BMS
- * (hardware) version fields honestly - a real read of what's currently
- * running - plus whatever the admin has published.
+ * "Check for update" popup - auto-opened by BMSDashboard.jsx on login/
+ * refresh whenever this device's Firebase firmware node reports a version
+ * the browser hasn't acknowledged yet (see the bms-fw-ack-* localStorage
+ * key there), per explicit request. Shows the live-reported ESP32
+ * (software) and BMS (hardware) version fields honestly - a real read of
+ * what's currently running - plus whatever the admin has published.
+ * Positioned near the top of the screen (not vertically centered) so it
+ * reads as an immediate notice rather than a dialog the user had to open.
  *
  * `deviceFirmware` is this specific device's own Firebase firmware node
  * ({latest_version, url, release_notes, update_flag}), written by the admin
@@ -51,7 +55,7 @@ export function VersionCheckModal({
   const isNew = latestVersion != null && latestVersion !== softwareVersion;
 
   return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-[110] flex items-start justify-center bg-black/40 p-4 pt-16 sm:pt-24 backdrop-blur-sm" onClick={onClose}>
       <div
         className="w-full max-w-sm animate-[weather-modal-in_0.3s_ease] rounded-3xl bg-[var(--card)] p-6 text-center shadow-2xl ring-1 ring-[var(--border)]"
         onClick={(e) => e.stopPropagation()}

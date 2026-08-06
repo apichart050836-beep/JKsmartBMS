@@ -23,6 +23,7 @@ import { computeBatteryHealthScore } from "./lib/batteryHealthScore.js";
 import { AlarmList } from "./components/AlarmList.jsx";
 import { AnnouncementBanner } from "./components/AnnouncementBanner.jsx";
 import { FirmwareUpdateToast } from "./components/FirmwareUpdateToast.jsx";
+import { VersionCheckModal } from "./components/VersionCheckModal.jsx";
 import { useDailyEnergy } from "./hooks/useDailyEnergy.js";
  
 
@@ -362,6 +363,57 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
   const activeDeviceMac = active.info?.jk_mac_address || activeConfig.deviceKey;
   const activeDeviceLabel = settings.myCustomName || activeDeviceMac;
 
+  // Auto-popup "new firmware published" prompt, per explicit request - real
+  // per-device signal (active.firmware.latest_version, written by the
+  // admin's publish panel to this exact device's Firebase firmware node),
+  // not the older global/acknowledge-only system. Persisted per browser
+  // (not per session) so clicking Update genuinely stops the nagging until
+  // admin publishes something newer - closing without updating does NOT
+  // persist anything, so it comes back on the next login/refresh, per spec.
+  const [showAutoUpdateModal, setShowAutoUpdateModal] = useState(false);
+  const [autoUpdateSending, setAutoUpdateSending] = useState(false);
+  const [autoUpdateError, setAutoUpdateError] = useState(null);
+  const [autoUpdateSent, setAutoUpdateSent] = useState(false);
+  const autoUpdateCheckedRef = useRef(null);
+
+  useEffect(() => {
+    if (!active.isLive || !activeConfig.hubId) return;
+    const latestVersion = active.firmware?.latest_version;
+    const currentVersion = active.info?.esp_firmware_version;
+    if (!latestVersion || latestVersion === currentVersion) return;
+
+    const checkKey = `${activeConfig.hubId}/${activeConfig.bmsKey ?? ""}`;
+    // Only ever auto-pop once per (device, latestVersion) per mount - a
+    // background data refresh re-running this effect shouldn't reopen a
+    // modal the user already closed this session.
+    if (autoUpdateCheckedRef.current === `${checkKey}:${latestVersion}`) return;
+
+    const ackKey = `bms-fw-ack-${checkKey}`;
+    if (localStorage.getItem(ackKey) === latestVersion) return;
+
+    autoUpdateCheckedRef.current = `${checkKey}:${latestVersion}`;
+    setAutoUpdateSent(false);
+    setAutoUpdateError(null);
+    setShowAutoUpdateModal(true);
+  }, [active.isLive, active.firmware?.latest_version, active.info?.esp_firmware_version, activeConfig.hubId, activeConfig.bmsKey]);
+
+  async function handleAutoFirmwareUpdate() {
+    setAutoUpdateSending(true);
+    setAutoUpdateError(null);
+    try {
+      await api.triggerFirmwareUpdate(activeConfig.hubId, activeConfig.bmsKey);
+      setAutoUpdateSent(true);
+      const latestVersion = active.firmware?.latest_version;
+      if (latestVersion) {
+        localStorage.setItem(`bms-fw-ack-${activeConfig.hubId}/${activeConfig.bmsKey ?? ""}`, latestVersion);
+      }
+    } catch (err) {
+      setAutoUpdateError(err.message || "ส่งคำสั่งไม่สำเร็จ");
+    } finally {
+      setAutoUpdateSending(false);
+    }
+  }
+
   useEffect(() => {
     setSettingsByPack((s) => {
       const next = { ...s };
@@ -514,6 +566,18 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
             />
             <AnnouncementBanner />
             <LogoutModal isOpen={isLogoutModalOpen} onClose={() => setIsLogoutModalOpen(false)} onConfirm={logout} />
+            <VersionCheckModal
+              open={showAutoUpdateModal}
+              onClose={() => setShowAutoUpdateModal(false)}
+              deviceLabel={activeDeviceLabel}
+              softwareVersion={active.info?.esp_firmware_version}
+              hardwareVersion={active.info?.hardware_version}
+              deviceFirmware={active.firmware}
+              onUpdate={handleAutoFirmwareUpdate}
+              updating={autoUpdateSending}
+              updateError={autoUpdateError}
+              updateSent={autoUpdateSent}
+            />
 
             {active.isLive && active.adminDisabled ? (
               <div className="mt-5 flex flex-col items-center justify-center gap-2 rounded-3xl bg-[var(--card)] p-16 text-center shadow-sm ring-1 ring-[var(--border)]">
