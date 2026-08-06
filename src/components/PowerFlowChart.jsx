@@ -1,5 +1,16 @@
 import React from "react";
-import { Zap, ArrowUpRight, ArrowDownRight, Activity } from "lucide-react";
+import { Zap, ArrowDownRight, Activity, Thermometer } from "lucide-react";
+import { statusTone } from "../lib/tone.js";
+
+// A sensor alarms as soon as it crosses the configured OTP; it flags amber a
+// few degrees before that so the approach is visible, not just the trip -
+// same band SensorRow.jsx used before this tile moved here.
+const ALERT_BAND_C = 5;
+function channelTone(value, otpLimit) {
+  if (value > otpLimit) return "critical";
+  if (value > otpLimit - ALERT_BAND_C) return "warning";
+  return "info";
+}
 
 /**
  * Power Flow Component
@@ -8,18 +19,20 @@ import { Zap, ArrowUpRight, ArrowDownRight, Activity } from "lucide-react";
 export function PowerFlowChart({
     packVoltage = 0,
     current = 0,
-    chargedAh = 0,
     dischargedAh = 0,
-    chargedWh = 0,
     dischargedWh = 0,
     socPercent = 0,
     remainingRuntime,
     timeToFullCharge,
-    recommendedChargeCurrentA,
     recommendedDischargeCurrentA,
-    configuredChargeCurrentA,
     configuredDischargeCurrentA,
     history = [],
+    channels = [],
+    temps = {},
+    maxTemp = 0,
+    otpLimit = 0,
+    cycleAh = 0,
+    cycleCount = 0,
 }) {
     // 1. คำนวณ Power Realtime (P = V * I)
     const rawPowerW = packVoltage * current;
@@ -29,8 +42,8 @@ export function PowerFlowChart({
     const isCharging = current > 0.1;
     const isDischarging = current < -0.1;
 
-    // 3. Real energy today so far - chargedWh/dischargedWh come from the
-    // server's actual V x I x t integration over telemetry_log (see
+    // 3. Real energy today so far - dischargedWh comes from the server's
+    // actual V x I x t integration over telemetry_log (see
     // useDailyEnergy.js / server/routes/history.js), not an Ah x
     // current-instant-voltage approximation.
 
@@ -73,48 +86,36 @@ export function PowerFlowChart({
 
             {/* Main Flow Diagram / Summary */}
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-                {/* Card 1: Charge Inflow (+) */}
-                <div
-                    className={`relative overflow-hidden rounded-xl p-4 ring-1 transition-all ${isCharging
-                            ? "bg-emerald-500/5 ring-emerald-500/30"
-                            : "bg-[var(--card)] ring-[var(--border)]"
-                        }`}
-                >
+                {/* Card 1: Temperature (5-Channel) + Cycle Information - moved
+                    here from SensorRow.jsx in place of the Charge Rate (+)
+                    card, per explicit request. */}
+                <div className="relative overflow-hidden rounded-xl bg-[var(--card)] p-4 ring-1 ring-[var(--border)]">
                     <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold text-[var(--muted-foreground)]">Charge Rate (+)</span>
-                        <ArrowUpRight className={`size-4 ${isCharging ? "text-emerald-500" : "text-gray-400"}`} />
+                        <span className="text-xs font-semibold text-[var(--muted-foreground)]">
+                            Temperature · {channels.length}-Ch
+                        </span>
+                        <Thermometer className="size-4 text-[var(--info)]" />
                     </div>
-                    <div className="mt-2 flex items-baseline gap-1">
-                        <span className="text-2xl font-bold text-[var(--foreground)] tabular-nums">
-                            {isCharging ? current.toFixed(1) : "0.0"}
-                        </span>
-                        <span className="text-xs text-[var(--muted-foreground)]">A</span>
-                        <span className="ml-auto text-xs font-semibold text-emerald-500 tabular-nums">
-                            {isCharging ? `+${absPowerW.toFixed(0)} W` : "0 W"}
-                        </span>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                        {channels.map((c) => {
+                            const value = temps[c.key];
+                            const t = statusTone(channelTone(value, otpLimit));
+                            return (
+                                <div key={c.key} className={`flex min-w-[44px] flex-1 flex-col items-center rounded-lg px-1.5 py-1 ${t.bg}`}>
+                                    <span className="text-[9px] font-semibold text-[var(--muted-foreground)]">{c.label}</span>
+                                    <span className={`text-xs font-bold tabular-nums ${t.fg}`}>{value.toFixed(1)}°</span>
+                                </div>
+                            );
+                        })}
                     </div>
                     <div className="mt-3 flex justify-between border-t border-[var(--border)]/60 pt-2 text-[11px] text-[var(--muted-foreground)]">
-                        <span>Daily Charged:</span>
-                        <span className="font-semibold text-[var(--foreground)] tabular-nums">
-                            {chargedAh.toFixed(1)} Ah ({(chargedWh / 1000).toFixed(2)} kWh)
-                        </span>
+                        <span>Cycle Capacity</span>
+                        <span className="font-semibold text-[var(--foreground)] tabular-nums">{cycleAh.toFixed(1)} Ah</span>
                     </div>
-                    {typeof recommendedChargeCurrentA === "number" && (
-                        <div className="mt-1.5 flex justify-between text-[11px] text-[var(--muted-foreground)]">
-                            <span>แนะนำไม่เกิน (0.25C)</span>
-                            <span className="font-semibold text-[var(--foreground)] tabular-nums">
-                                {recommendedChargeCurrentA.toFixed(1)} A
-                            </span>
-                        </div>
-                    )}
-                    {typeof configuredChargeCurrentA === "number" && (
-                        <div className="mt-1.5 flex justify-between text-[11px] text-[var(--muted-foreground)]">
-                            <span>ค่าชาร์จที่ตั้งไว้</span>
-                            <span className="font-semibold text-[var(--foreground)] tabular-nums">
-                                {configuredChargeCurrentA.toFixed(1)} A
-                            </span>
-                        </div>
-                    )}
+                    <div className="mt-1.5 flex justify-between text-[11px] text-[var(--muted-foreground)]">
+                        <span>Cycle Count</span>
+                        <span className="font-semibold text-[var(--foreground)] tabular-nums">{cycleCount.toFixed(1)} cycles</span>
+                    </div>
                 </div>
 
                 {/* Card 2: Main Power Hub Center */}

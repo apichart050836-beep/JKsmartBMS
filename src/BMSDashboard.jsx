@@ -10,7 +10,6 @@ import { InstallationLocationModal } from "./components/InstallationLocationModa
 import { WeatherModal } from "./components/WeatherModal.jsx";
 import { DetailedLog } from "./components/DetailedLog.jsx";
 import { SystemHero } from "./components/SystemHero.jsx";
-import { SensorRow } from "./components/SensorRow.jsx";
 import { CommunicationPanel } from "./components/CommunicationPanel.jsx";
 import { PowerFlowChart } from "./components/PowerFlowChart.jsx";
 import { ChargeDischargeChart } from "./components/ChargeDischargeChart.jsx";
@@ -660,11 +659,10 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
   // charge (Ah) a pack holds.
   const effectiveCapacityAh = settings.capacityAh;
   const displaySoc = clamp((active.remainingAh / effectiveCapacityAh) * 100, 0, 100);
-  // Recommended charge/discharge current: 0.25C / 0.5C of rated capacity
-  // respectively, per request - a conservative, chemistry-agnostic rule of
-  // thumb rather than a per-cell datasheet limit (the app doesn't have
-  // per-cell datasheet data to work from).
-  const recommendedChargeCurrentA = effectiveCapacityAh * 0.25;
+  // Recommended discharge current: 0.5C of rated capacity, per request - a
+  // conservative, chemistry-agnostic rule of thumb rather than a per-cell
+  // datasheet limit (the app doesn't have per-cell datasheet data to work
+  // from).
   const recommendedDischargeCurrentA = effectiveCapacityAh * 0.5;
 
   const balDeltaVolt = settings.balDeltaVolt;
@@ -861,36 +859,31 @@ const isOnline = active.isLive
               onOpenAlarms={() => setShowAlarms(true)}
                                       />
 
-           {/* Power Flow: charge/discharge current over time, 0-baseline split */}
+           {/* Power Flow: charge/discharge current over time, 0-baseline split.
+               Card 1 shows Temperature/Cycle Info (moved in from SensorRow.jsx,
+               replacing the old Charge Rate card) per explicit request. */}
             <div className="mt-3 space-y-5">
              <PowerFlowChart
                packVoltage={active.packVoltage}
                current={active.current}
-               chargedAh={activeEnergy.chargedAh}
                dischargedAh={activeEnergy.dischargedAh}
-               chargedWh={dailyEnergy.chargedWh}
                dischargedWh={dailyEnergy.dischargedWh}
                socPercent={displaySoc}
                remainingRuntime={active.remainingRuntime}
                timeToFullCharge={active.timeToFullCharge}
-               recommendedChargeCurrentA={recommendedChargeCurrentA}
                recommendedDischargeCurrentA={recommendedDischargeCurrentA}
-               configuredChargeCurrentA={settings.contChgCurr}
                configuredDischargeCurrentA={settings.contDsgCurr}
                history={active.powerHistory}
+               channels={active.tempChannels}
+               temps={active.temps}
+               maxTemp={active.maxTemp}
+               otpLimit={otpLimit}
+               cycleAh={active.cycleAh}
+               cycleCount={active.cycleCount}
              />
                                       </div>
 
         <div className="mt-3 space-y-5">
-          {/* Sensor Row: Temperature / Cycle Information (Capacity + Count combined) */}
-          <SensorRow
-            channels={active.tempChannels}
-            temps={active.temps}
-            maxTemp={active.maxTemp}
-            otpLimit={otpLimit}
-            cycleAh={active.cycleAh}
-            cycleCount={active.cycleCount}
-          />
 
                                           {/* Section 2: Cell Voltage Monitoring - wire/connector resistance
               (wiring/busbar connection quality per cell tap, NOT the cell's

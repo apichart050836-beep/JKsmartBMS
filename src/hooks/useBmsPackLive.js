@@ -179,7 +179,7 @@ export function useBmsPackLive(config) {
   const dailyDischargeKwh = status.dailyDischargeKwh ?? 0;
 
   // 5-channel set per explicit spec - t1, t2, t4, t5 (t3 deliberately
-  // excluded), plus CMOS/MOSFET temp. SensorRow's "N-Channel" label reads
+  // excluded), plus CMOS/MOSFET temp. PowerFlowChart's "N-Ch" label reads
   // channels.length directly, so this list is the single place that count
   // comes from - adding another real sensor field here is enough to grow
   // the label and tile automatically.
