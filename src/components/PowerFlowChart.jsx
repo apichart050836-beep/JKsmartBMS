@@ -155,13 +155,13 @@ export function PowerFlowChart({
                 <div className="relative overflow-hidden rounded-xl bg-[var(--card)] p-4 ring-1 ring-[var(--border)]">
                     <div className="flex items-center justify-between">
                         <span className="text-xs font-semibold text-[var(--muted-foreground)]">Current Limits</span>
-                        <Gauge className="size-4 text-[var(--muted-foreground)]" />
+                        <Gauge className="size-4 text-[var(--brand)]" />
                     </div>
                     <div className="mt-3 space-y-1.5">
                         {typeof recommendedDischargeCurrentA === "number" && (
                             <div className="flex justify-between text-[11px] text-[var(--muted-foreground)]">
                                 <span>แนะนำดิสชาร์จไม่เกิน (0.5C)</span>
-                                <span className="font-semibold text-[var(--foreground)] tabular-nums">
+                                <span className="font-semibold text-amber-500 tabular-nums">
                                     {recommendedDischargeCurrentA.toFixed(1)} A
                                 </span>
                             </div>
@@ -169,7 +169,7 @@ export function PowerFlowChart({
                         {typeof configuredDischargeCurrentA === "number" && (
                             <div className="flex justify-between text-[11px] text-[var(--muted-foreground)]">
                                 <span>ค่าดิสชาร์จที่ตั้งไว้</span>
-                                <span className="font-semibold text-[var(--foreground)] tabular-nums">
+                                <span className="font-semibold text-amber-500 tabular-nums">
                                     {configuredDischargeCurrentA.toFixed(1)} A
                                 </span>
                             </div>
@@ -178,7 +178,7 @@ export function PowerFlowChart({
                         {typeof recommendedChargeCurrentA === "number" && (
                             <div className="flex justify-between text-[11px] text-[var(--muted-foreground)]">
                                 <span>แนะนำชาร์จไม่เกิน (0.25C)</span>
-                                <span className="font-semibold text-[var(--foreground)] tabular-nums">
+                                <span className="font-semibold text-[var(--brand)] tabular-nums">
                                     {recommendedChargeCurrentA.toFixed(1)} A
                                 </span>
                             </div>
@@ -186,7 +186,7 @@ export function PowerFlowChart({
                         {typeof configuredChargeCurrentA === "number" && (
                             <div className="flex justify-between text-[11px] text-[var(--muted-foreground)]">
                                 <span>ค่าชาร์จที่ตั้งไว้</span>
-                                <span className="font-semibold text-[var(--foreground)] tabular-nums">
+                                <span className="font-semibold text-[var(--brand)] tabular-nums">
                                     {configuredChargeCurrentA.toFixed(1)} A
                                 </span>
                             </div>

@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { ArrowUpRight, ArrowDownRight, Cable, RefreshCw, WifiOff, Clock, MessageCircleQuestion } from "lucide-react";
+import { ArrowUpRight, ArrowDownRight, Cable, RefreshCw, WifiOff, Clock, MessageCircleQuestion, Zap } from "lucide-react";
 import { clamp, statusTone, voltDiffToneWithThreshold } from "./lib/tone.js";
 import { useBmsPackLive } from "./hooks/useBmsPackLive.js";
 import { useHubDevices } from "./hooks/useHubDevices.js";
@@ -10,6 +9,7 @@ import { InstallationLocationModal } from "./components/InstallationLocationModa
 import { WeatherModal } from "./components/WeatherModal.jsx";
 import { DetailedLog } from "./components/DetailedLog.jsx";
 import { SystemHero } from "./components/SystemHero.jsx";
+import { SensorRow } from "./components/SensorRow.jsx";
 import { CommunicationPanel } from "./components/CommunicationPanel.jsx";
 import { PowerFlowChart } from "./components/PowerFlowChart.jsx";
 import { ChargeDischargeChart } from "./components/ChargeDischargeChart.jsx";
@@ -25,33 +25,11 @@ import { AlarmList } from "./components/AlarmList.jsx";
 import { AnnouncementBanner } from "./components/AnnouncementBanner.jsx";
 import { FirmwareUpdateToast } from "./components/FirmwareUpdateToast.jsx";
 import { useDailyEnergy } from "./hooks/useDailyEnergy.js";
-/**
- * Design language cloned from the ThemeWagon "Smart Home" dashboard template:
- * white bg-card tiles (rounded-2xl, ring-1 ring-border, shadow-sm) floating on a
- * muted page canvas, a single --brand accent, icon avatars in brand-tinted
- * rounded-xl chips, and a 270deg arc gauge (see energy-widget.tsx in the kit)
- * reused here for SOC / SOH. Tokens are declared as CSS vars so the file has
- * zero dependency on the kit's tailwind/shadcn setup.
- */
+ 
 
-// React hooks must be called an unconditional, fixed number of times per
-// render - can't call useBmsPackLive in a loop sized to however many real
-// devices Firebase happens to report. This is that fixed ceiling: always
-// call the hook this many times, but only ever RENDER tabs/data for slots
-// that a real discovered device got assigned to (see `slots` below). Not a
-// device-identity hardcode - just headroom past the 3 devices seen live
-// today so a 4th doesn't need a code change; bump it if the fleet outgrows it.
 const MAX_BMS_SLOTS = 10;
-
-// localStorage key for the last-selected BMS tab, so a page refresh doesn't
-// silently bounce the user back to BMS 1.
 const ACTIVE_BMS_STORAGE_KEY = "bms-active-tab";
 
-// Applied to every discovered device uniformly - the reference-screenshot
-// OVP/UVP numbers (2.70V/1.80V) don't fit this pack's real chemistry (live
-// cells sit ~3.0-3.2V, which would trip a false OVP alarm on every cell
-// immediately). Standard LiFePO4 protection points instead; edit anytime
-// per-pack in Configuration.
 const LIFEPO4_VOLTAGE_DEFAULTS = {
   cellOvp: 3.65,
   cellRcv: 3.55,
@@ -60,18 +38,9 @@ const LIFEPO4_VOLTAGE_DEFAULTS = {
   cellUvpr: 2.9,
   soc0Volt: 2.6,
   cellUvp: 2.5,
-    pwrOffVolt: 2.2,
+  pwrOffVolt: 2.2,
 };
 
-
-// Builds the fixed-length slot list useBmsPackLive is called against. Slot
-// `id` is positional (`bms-slot-N`) and stable from the very first render,
-// deliberately NOT derived from the device key - device discovery is async,
-// so an id that changed once real data arrived would silently orphan
-// whatever tab/settings the user already had selected.
-//
-// `devices` is every {hubId, bmsKey} pair the backend has already filtered
-// to this session (role=admin -> every hub, role=user -> only their own).
 function buildBmsSlots(devices) {
   return Array.from({ length: MAX_BMS_SLOTS }, (_, i) => {
     const device = devices[i] ?? null;
@@ -85,52 +54,27 @@ function buildBmsSlots(devices) {
       bmsKey,
       deviceKey: hubId ? (bmsKey ?? hubId) : null,
       path: hubId ? (bmsKey ? `JK_BMS_HUB/${hubId}/${bmsKey}` : `JK_BMS_HUB/${hubId}`) : null,
-      ratedCapacityAh: 50, // JK reports nominal_capacity itself; this is just the pre-connect fallback
+      ratedCapacityAh: 0,
       cellCount: 4,
       voltageDefaults: LIFEPO4_VOLTAGE_DEFAULTS,
     };
   });
 }
 
-// The bridge firmware has gone through more than one settings field-naming
-// scheme (snake_case like cell_ovp/cell_count, then camelCase/public names
-// like overVoltageProtection/cellCount) - `fb` is the CURRENT name (also
-// what saveSetting() writes going forward), `legacy` lists older names to
-// still read from if the ESP32 hasn't been reflashed with the latest
-// jkbms-bridge.yaml yet. Every key the dashboard actually has a real
-// firmware-backed field for needs an entry here - reads only merge in keys
-// listed in this map, there's no implicit passthrough for the rest (the
-// other Configuration fields - emergency timer, UART protocol, calibration,
-// etc - have no corresponding entity in the component at all yet).
-// This whole map now treats the exact field-name convention from the
-// reference payload (e072a1d6dd18's live data, pasted in chat) as the
-// canonical/primary `fb` name throughout - snake_case for nearly
-// everything. Names that were previously primary (mostly this dashboard's
-// own camelCase guesses, never actually confirmed live on any device) are
-// now demoted to `legacy` fallbacks for C847807A5311/A867307A5T&9, which
-// still report the older convention.
 const REMOTE_SETTINGS_MAP = {
   myCustomName: { fb: "my_custom_name", legacy: ["myBmsCustomName"] },
   cellOvp: { fb: "cell_ovp", legacy: ["overVoltageProtection"] },
   cellOvpr: { fb: "cell_ovpr", legacy: ["overVoltageRecovery"] },
-  // Confirmed live (2026-07-28) this is a genuinely separate register from
-  // cell_ovpr, not the same one mirrored - cell_ovpr read 3.4V while
-  // cell_rcv read 3.51V on the same device at the same time. The earlier
-  // "only one OVP-recovery register" assumption was wrong.
   cellRcv: { fb: "cell_rcv" },
   cellUvp: { fb: "cell_uvp", legacy: ["underVoltageProtection"] },
   cellUvpr: { fb: "cell_uvpr", legacy: ["underVoltageRecovery"] },
   cellCount: { fb: "cell_count", legacy: ["cellCount"] },
   capacityAh: { fb: "capacity", legacy: ["capacityAh"] },
   balancer: { fb: "balancer", legacy: ["balancerSwitch"] },
-  // "charge"/"discharge" are the canonical write/read names per explicit
-  // instruction - match status.charge/status.discharge's own naming too
-  // (were "chargingSwitch"/"dischargingSwitch" before).
   charge: { fb: "charge", legacy: ["chargingSwitch"] },
   discharge: { fb: "discharge", legacy: ["dischargingSwitch"] },
   maxBalCurrent: { fb: "max_bal_current", legacy: ["maxBalCurrent", "maxBalanceCurrent"] },
   balStartVolt: { fb: "bal_start_volt", legacy: ["balStartVolt"] },
-  // Firmware stores this in volts (e.g. 0.016); dashboard shows/edits mV.
   balDeltaVolt: {
     fb: "bal_delta_volt",
     legacy: ["balDeltaVolt"],
@@ -139,15 +83,9 @@ const REMOTE_SETTINGS_MAP = {
   },
   disableTempSensor: { fb: "disable_temp", legacy: ["disableTempSensor"] },
   chargeFloatMode: { fb: "float_mode", legacy: ["chargeFloatMode"] },
-  // "timed_stored_data" and older "timed_data" both exist on e072a1d6dd18 -
-  // name match to the dashboard's own "timedStoredData" is closer.
   timedStoredData: { fb: "timed_stored_data", legacy: ["timed_data", "timedStoredData"] },
-  // "discharge_ocp_2"/"discharge_ocp_3" superseded the older bare "ocp_2".
   dsgOcp2: { fb: "discharge_ocp_2", legacy: ["ocp_2", "dsgOcp2"] },
   dsgOcp3: { fb: "discharge_ocp_3", legacy: ["dsgOcp3"] },
-  // Delay/recovery timers, confirmed live on e072a1d6dd18 (charge_ocp_delay:
-  // 300, charge_ocpr_time: 400, discharge_ocp_delay: 300,
-  // discharge_ocpr_time: 60) - none of these four had any mapping before.
   chgOcpDelay: { fb: "charge_ocp_delay" },
   chgOcprTime: { fb: "charge_ocpr_time" },
   dsgOcpDelay: { fb: "discharge_ocp_delay" },
@@ -163,50 +101,26 @@ const REMOTE_SETTINGS_MAP = {
   intermittentAlarm: { fb: "alarm_intermittent", legacy: ["intermittentAlarm"] },
   lcdBuzzerTrigger: { fb: "lcd_buzzer_trigger", legacy: ["lcdBuzzerTrigger"] },
   dry1Trigger: { fb: "dry1_trigger", legacy: ["dry1Trigger"] },
-  // Newly confirmed live on e072a1d6dd18 - none of these three had ANY
-  // mapping before (Configuration showed local-only defaults, no real sync).
   chgOtp: { fb: "charge_otp" },
   chgUtp: { fb: "charge_utp" },
   dsgOtp: { fb: "discharge_otp" },
-  // No plain "discharge_utp" field exists - discharge_undertemperature_
-  // protection is the real name for this concept.
   dsgUtp: { fb: "discharge_undertemperature_protection" },
-  // Recovery counterparts, confirmed live on e072a1d6dd18 alongside the OTP/
-  // UTP fields above (charge_otpr: 59, charge_utpr: 16, discharge_otpr: 60,
-  // cmos_otp: 80, cmos_otpr: 70).
   chgOtpr: { fb: "charge_otpr" },
   chgUtpr: { fb: "charge_utpr" },
   dsgOtpr: { fb: "discharge_otpr" },
   cmosOtp: { fb: "cmos_otp" },
   cmosOtpr: { fb: "cmos_otpr" },
   cellRfv: { fb: "cell_rfv" },
-  // Confirmed live on e072a1d6dd18 (30) - "Emerg. Timer" had no mapping
-  // before, Configuration always showed the local-only default.
   emergTimer: { fb: "emergency_duration" },
-  // RCV Time maps by name to cell_rcv_time (even though its value happens
-  // to mirror cell_rcv's voltage on this device - per explicit
-  // confirmation, that's still the correct field to bind to). RFV Time is
-  // a separate new field for cell_rfv_time (the other, distinct time value).
   rcvTime: { fb: "cell_rcv_time" },
   rfvTime: { fb: "cell_rfv_time" },
-  // Not live on any of the 3 devices yet (same situation max_bal_current
-  // was in before it appeared) - wired as the forward-looking name per
-  // explicit instruction, ready the moment firmware starts reporting it.
   currCalibration: { fb: "current_calibration" },
-  //
-  // Values are the descriptive protocol strings themselves (e.g. "JK BMS
-  // RS485 Modbus V1.0"), not a numeric code - confirmed from both the real
-  // BMS app's own <select> markup and live Firebase data.
   canProtocol: { fb: "can_protocol", legacy: ["canProtocol"] },
   uart1Protocol: { fb: "uart1_protocol", legacy: ["uart1Protocol"] },
   uart2Protocol: { fb: "uart2_protocol", legacy: ["uart2Protocol"] },
   uart3Protocol: { fb: "uart3_protocol", legacy: ["uart3Protocol"] },
 };
 
-// Charge/Discharge Switch debug logging - every actual change to these two
-// fields' local state should say WHY, per explicit bug report ("Charge
-// Switch turns OFF by itself"). See the write-guard in BMSDashboard's
-// settings-sync effect and saveSetting() for what calls this and when.
 function logSwitchChange(dashKey, reason, value) {
   const tag = dashKey === "charge" ? "[ChargeSwitch]" : "[DischargeSwitch]";
   console.log(`${tag} ${reason}`, value);
@@ -214,7 +128,6 @@ function logSwitchChange(dashKey, reason, value) {
 
 function defaultSettings(pack) {
   return {
-      // Control & Core
     myCustomName: "",
     charge: true,
     discharge: true,
@@ -223,12 +136,10 @@ function defaultSettings(pack) {
     lcdAlwaysOn: false,
     cellCount: pack.cellCount ?? 16,
     capacityAh: pack.ratedCapacityAh,
-    // Active Balancer
     balancer: true,
     balDeltaVolt: 20,
     balStartVolt: 3.3,
     maxBalCurrent: 1.0,
-    // Voltage Protection
     cellOvp: 2.7,
     cellRcv: 2.68,
     socFullVolt: 2.65,
@@ -238,7 +149,6 @@ function defaultSettings(pack) {
     cellUvp: 1.8,
     pwrOffVolt: 1.7,
     ...pack.voltageDefaults,
-    // Current Protection
     contChgCurr: 100,
     contDsgCurr: 100,
     dsgOcp2: true,
@@ -247,7 +157,6 @@ function defaultSettings(pack) {
     chgOcprTime: 400,
     dsgOcpDelay: 300,
     dsgOcprTime: 60,
-    // Temperature Protection
     disableTempSensor: false,
     chgOtp: 55,
     chgUtp: 0,
@@ -258,33 +167,21 @@ function defaultSettings(pack) {
     dsgOtpr: 60,
     cmosOtp: 80,
     cmosOtpr: 70,
-    // Data and Communication
     deviceAddress: 1,
     timedStoredData: true,
     dataStoredPeriod: 3600,
-    // Real values are the descriptive strings themselves (e.g. "JK BMS
-    // RS485 Modbus V1.0"), not numeric codes - CAN and UART1/2/3 have their
-    // OWN separate option pools, see CAN_PROTOCOL_LIST/UART_PROTOCOL_LIST.
     canProtocol: "JK BMS CAN Protocol (250K) V2.0",
     uart1Protocol: "JK BMS RS485 Modbus V1.0",
     uart2Protocol: "4G-GPS Remote module Common protocol V4.2",
     uart3Protocol: "4G-GPS Remote module Common protocol V4.2",
-    // Alarm and Emergency
     intermittentAlarm: true,
     emergTimer: 10,
-    // Real values are the descriptive strings themselves (e.g. "MOSFET Over
-    // Temperature"), not numeric codes - see TRIGGER_LIST.
     lcdBuzzerTrigger: "OFF",
     dry1Trigger: "OFF",
-    // Charge Control
     chargeFloatMode: false,
     cellRfv: 3.4,
     rcvTime: 30,
     rfvTime: 5,
-    // Calibration (Factory Only) - 0 until seeded from the real
-    // status.battery_voltage reading (see the one-time seed effect below),
-    // not a hardcoded guess. The old 52.58 default was a leftover from the
-    // original 16S mock spec and never matched this real 4S (~12.8V) pack.
     voltCalibration: 0,
     currCalibration: 0,
   };
@@ -293,27 +190,18 @@ function defaultSettings(pack) {
 function Pill({ tone = "brand", icon: Icon, children }) {
   const t = statusTone(tone);
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${t.bg} ${t.fg}`}>
-      {Icon && <Icon className="size-3" />}
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold shadow-sm ${t.bg} ${t.fg}`}>
+      {Icon && <Icon className="size-3.5" />}
       {children}
     </span>
   );
 }
-
-// ---------------------------------------------------------------------------
-// Main dashboard
-// ---------------------------------------------------------------------------
 
 export default function BMSDashboard({ onSoftwareVersionChange }) {
   const { logout } = useAuth();
   const { hubs } = useHubData();
   const [now, setNow] = useState(new Date());
   const [showWeatherModal, setShowWeatherModal] = useState(false);
-  // Persisted across refreshes - slot ids are stable/positional (see
-  // buildBmsSlots), so restoring whichever one the user had open last is
-  // safe even though the underlying device list is only known after
-  // devices load. Falls back to the first slot for a first-ever visit or
-  // if localStorage is unavailable.
   const [activeBmsId, setActiveBmsId] = useState(() => {
     try {
       return localStorage.getItem(ACTIVE_BMS_STORAGE_KEY) || "bms-slot-0";
@@ -321,74 +209,36 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
       return "bms-slot-0";
     }
   });
+
   useEffect(() => {
     try {
       localStorage.setItem(ACTIVE_BMS_STORAGE_KEY, activeBmsId);
-    } catch {
-      // Storage unavailable (private mode, quota, etc.) - just don't persist.
-    }
+    } catch {}
   }, [activeBmsId]);
+
   const [showLog, setShowLog] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
   const [showAlarms, setShowAlarms] = useState(false);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
   const [saveError, setSaveError] = useState(null);
-  // The only thing that's actually dynamic per render - which devices the
-  // backend has reported for this session (already role-filtered
-  // server-side). Everything else below (slot count, defaults) is a fixed,
-  // uniform structure built around this.
+
   const { devices, loaded: hubLoaded } = useHubDevices();
   const slots = buildBmsSlots(devices);
 
-  // Weather is about the physical BMS/solar installation, not any one BMS
-  // pack - one location per hub (account), shared by every device/tab that
-  // opens this dashboard. Every slot's hubId is identical for a 'user' role
-  // session (they only ever have the one hub), so the first slot with a
-  // real device is enough to identify it.
   const weatherHubId = devices[0]?.hubId ?? null;
   const rawSavedLocation = weatherHubId ? hubs[weatherHubId]?.location ?? null : null;
-  // Memoized by actual value, not object identity - `hubs` is a fresh
-  // object from every socket/poll update, including BMSDashboard's own 1s
-  // clock re-renders, so an unmemoized `savedLocation` got a new reference
-  // constantly. That fed straight into InstallationLocationModal's reset
-  // effect as a changing dependency, wiping out anything the user had just
-  // typed into the search box a moment after each keystroke.
   const savedLocation = useMemo(
     () => (rawSavedLocation ? { name: rawSavedLocation.name, lat: rawSavedLocation.lat, lng: rawSavedLocation.lng } : null),
     [rawSavedLocation?.name, rawSavedLocation?.lat, rawSavedLocation?.lng]
   );
   const weatherLoc = useWeatherLocation(weatherHubId, savedLocation);
 
-  // Each pack keeps its own configuration, edited via the Configuration
-  // modal. Every slot uses the same uniform defaults (see buildBmsSlots),
-  // so this doesn't need to wait on device discovery to initialize.
   const [settingsByPack, setSettingsByPack] = useState(() =>
     Object.fromEntries(slots.map((b) => [b.id, defaultSettings(b)]))
   );
   const settings = settingsByPack[activeBmsId];
-
-  // Charge/Discharge Switch write-guard - see saveSetting() and the
-  // settings-sync effect below. Every OTHER Configuration field is fine
-  // being silently overwritten by whatever's currently in Firebase on every
-  // poll (that's how edits made directly on the BMS/LCD show up here) - but
-  // per explicit bug report, the Charge/Discharge switches specifically
-  // must never flip because of stale poll timing: user toggles ON, the
-  // write to Firebase is still in flight, and a poll that started just
-  // before it lands reads the old OFF value and (with the old unconditional
-  // sync) blindly overwrote the switch right back to OFF a moment later -
-  // classic race condition, same class already found and fixed once for
-  // DeviceNameRow above. Keyed by pack id -> { charge?: { pending, seeded },
-  // discharge?: { pending, seeded } }. `pending !== undefined` means "we
-  // just wrote this value and are still waiting to see Firebase echo it
-  // back." `seeded` distinguishes "this pack's very first real value from
-  // Firebase" (adopted silently - not a "change" from anything) from a
-  // genuine later change once a real baseline exists.
   const chargeSwitchGuardRef = useRef({});
 
-  // Hooks must run an unconditional, fixed number of times per render - see
-  // MAX_BMS_SLOTS. Slots with no device assigned yet just get `path: null`,
-  // which useBmsPackLive treats as "nothing to subscribe to" rather than
-  // erroring.
   const bms0 = useBmsPackLive(slots[0]);
   const bms1 = useBmsPackLive(slots[1]);
   const bms2 = useBmsPackLive(slots[2]);
@@ -400,15 +250,54 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
   const bms8 = useBmsPackLive(slots[8]);
   const bms9 = useBmsPackLive(slots[9]);
 
-  const packs = [bms0, bms1, bms2, bms3, bms4, bms5,bms6,bms7,bms8,bms9];
+  const packs = [bms0, bms1, bms2, bms3, bms4, bms5, bms6, bms7, bms8, bms9];
+  const totalAggregatedCurrent = packs.reduce((acc, p) => acc + (p.current || 0), 0);
+  const totalAggregatedPower = packs.reduce((acc, p) => acc + (p.power || 0), 0);
+  const totalRemainingAh = packs.reduce((acc, p) => acc + (p.remainingAh || 0), 0);
+  const totalCapacityAh = packs.reduce((acc, p) => {
+    // เช็คว่ามีสล็อตนี้อยู่จริง และเปิดใช้งานอยู่ (ปรับเงื่อนไขตามโครงสร้างสล็อตของคุณ เช่น s.enabled หรือ s.id)
+  
+      return acc + (p.ratedCapacityAh  || 0);
+    
+    return acc;
+  }, 0);
+  const aggregatedSoc = clamp((totalRemainingAh / totalCapacityAh) * 100, 0, 100);
+
+  // กรองเอาเฉพาะแพ็คที่ออนไลน์อยู่ (isLive)
+  const livePacks = packs.filter(p => p.isLive && p.packVoltage > 0);
+
+  // หา Pack Voltage โดยดึงค่าจากแพ็คแรกที่ออนไลน์อยู่ (เพราะต่อขนานกัน แรงดันจะเท่ากันหมด)
+  // หรือถ้าต้องการความแม่นยำขึ้น สามารถหาค่าเฉลี่ยเฉพาะแพ็คที่ออนไลน์ได้ครับ
+  const avgPackVoltage = livePacks.length > 0 
+    ? livePacks[0].packVoltage 
+    : 0;
+  const solarGenPower = Math.abs(totalAggregatedPower > 0 ? totalAggregatedPower : 0); 
+  const solarCurrent =  solarGenPower ;
+  let loadConsumptionPower = 0;
+
+  if (totalAggregatedPower < 0) {
+    // แบตเตอรี่กำลังจ่ายไฟ (Discharging): โหลดจะได้พลังงานจากทั้งโซล่าเซลล์และแบตเตอรี่
+    loadConsumptionPower = solarGenPower + Math.abs(totalAggregatedPower);
+  } else {
+    // แบตเตอรี่กำลังชาร์จ (Charging): โหลดจะได้พลังงานเฉพาะส่วนที่เหลือจากโซล่าเซลล์หลังหักชาร์จแบตแล้ว
+    loadConsumptionPower = Math.max(0, solarGenPower - totalAggregatedPower);
+  }
+
+  // สมมติว่ามีพลังงานรวมที่เหลืออยู่ (Wh) หรือคำนวณจาก Ah คงเหลือ คูณด้วย แรงดันแพ็ค
+  const totalRemainingWh = totalRemainingAh * avgPackVoltage;
+
+  // คำนวณชั่วโมงที่ใช้งานได้ (ป้องกันการหารด้วย 0)
+  const remainingHours = loadConsumptionPower > 0 
+    ? totalRemainingWh / loadConsumptionPower 
+    : 0;
+
+  // แปลงเป็น ชั่วโมง และ นาที (เพื่อให้แสดงผลเข้าใจง่าย เช่น "2 ชม. 30 นาที")
+  const remHoursInt = Math.floor(remainingHours);
+  const remMinutesInt = Math.round((remainingHours - remHoursInt) * 60);
+
   const active = packs.find((p) => p.id === activeBmsId) ?? packs[0];
   const activeConfig = slots.find((b) => b.id === activeBmsId) ?? slots[0];
 
-  // Reports the active device's versions up to App.jsx, which renders the
-  // Update badge/button next to the "Dashboard" nav pill (outside this
-  // component) and its "check for update" popup - hardware_version is the
-  // real field for "BMS Version" (e.g. "15H"), confirmed live alongside
-  // software_version on the same info node.
   useEffect(() => {
     onSoftwareVersionChange?.({
       software: active.info?.software_version ?? null,
@@ -416,8 +305,6 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
       deviceLabel: active.name,
       hubId: activeConfig.hubId ?? null,
       bmsKey: activeConfig.bmsKey ?? null,
-      // Real per-device OTA node (admin upload -> Firebase, ESP32's
-      // ota_updater polls it) - see useBmsPackLive.js's `firmware` field.
       firmware: active.firmware ?? null,
     });
   }, [
@@ -430,13 +317,6 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
     onSoftwareVersionChange,
   ]);
 
-  // ESP32 firmware version - real field (info.software_version), same
-  // object already used for battery_type elsewhere. There's no dedicated
-  // "update in progress" field in Firebase, so a firmware update is
-  // inferred the only way it's observable here: this specific device's
-  // own software_version reading changing value between polls. Tracked
-  // per-slot (not globally) so switching to a device that just happens to
-  // run a different version doesn't get mistaken for an update.
   const prevVersionsRef = useRef({});
   const [firmwareUpdate, setFirmwareUpdate] = useState(null);
   useEffect(() => {
@@ -450,48 +330,14 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
       }
       prevVersionsRef.current[pack.id] = version;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    bms0.info,
-    bms1.info,
-    bms2.info,
-    bms3.info,
-    bms4.info,
-    bms5.info,
-    bms6.info,
-    bms7.info,
-    bms8.info,
-    bms9.info,
-  ]);
+  }, [bms0.info, bms1.info, bms2.info, bms3.info, bms4.info, bms5.info, bms6.info, bms7.info, bms8.info, bms9.info]);
 
-  // Real today-so-far charged/discharged Ah & Wh, computed server-side from
-  // actual telemetry_log rows (V x I x t via the real signed charge_current
-  // field) - not Firebase's dailyChargeAh/dailyDischargeAh, which don't
-  // exist on any real device and always read 0.
   const dailyEnergy = useDailyEnergy(activeConfig.hubId, activeConfig.bmsKey);
   const activeEnergy = { chargedAh: dailyEnergy.chargedAh, dischargedAh: dailyEnergy.dischargedAh };
   const activeAlarms = computeAlarms(active, settings);
-  // info.jk_mac_address is the real JK BMS unit's own MAC (read over BLE),
-  // separate from activeConfig.deviceKey (the ESP32 bridge's own Firebase
-  // node key) - shows the actual battery pack's identity instead of the
-  // WiFi bridge's, when the device has reported it. Confirmed live only
-  // some devices report this field yet, so falls back to the bridge key
-  // for the rest rather than showing nothing.
   const activeDeviceMac = active.info?.jk_mac_address || activeConfig.deviceKey;
-  // Prefer the custom name synced from settings.my_custom_name, then the
-  // device's real MAC - always shows *something* identifiable rather than
-  // falling back to a MAC that's no longer meaningfully available per-slot
-  // now that devices are discovered, not individually hardcoded.
   const activeDeviceLabel = settings.myCustomName || activeDeviceMac;
 
-  // Pull real Configuration values back from Firebase for every live pack,
-  // in real time - `.../settings` is the same node saveSetting() writes to,
-  // so whatever's actually stored there (from the BMS itself, or a previous
-  // save from this app) overrides that pack's local defaults the instant it
-  // loads or changes. Any key Firebase doesn't have yet keeps its local
-  // default. Dependency array is fixed-length (one entry per hook-call
-  // slot) same as the hook calls above - reacts to any slot's remoteSettings
-  // changing, not just one.
   useEffect(() => {
     setSettingsByPack((s) => {
       const next = { ...s };
@@ -504,9 +350,6 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
           const raw = pack.remoteSettings[rawKey];
           const value = m.toDash ? m.toDash(raw) : raw;
 
-          // Charge/Discharge write-guard (see chargeSwitchGuardRef above) -
-          // every other field keeps the old unconditional apply-on-every-
-          // poll behavior unchanged.
           if (dashKey === "charge" || dashKey === "discharge") {
             if (!chargeSwitchGuardRef.current[pack.id]) chargeSwitchGuardRef.current[pack.id] = {};
             if (!chargeSwitchGuardRef.current[pack.id][dashKey]) {
@@ -515,115 +358,30 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
             const guard = chargeSwitchGuardRef.current[pack.id][dashKey];
             if (guard.pending !== undefined) {
               if (value === guard.pending) {
-                // Our own write round-tripped through Firebase - confirmed,
-                // stop guarding this key.
                 guard.pending = undefined;
               } else {
-                // A poll that started before our write landed, reading the
-                // old value - ignore it rather than let it clobber what the
-                // user just set. Not applied to `patch` at all, so `next`
-                // keeps whatever's already there.
-                logSwitchChange(dashKey, "Ignored invalid overwrite (stale poll racing a pending write)", value);
+                logSwitchChange(dashKey, "Ignored invalid overwrite", value);
                 continue;
               }
             } else if (!guard.seeded) {
-              // First real value this pack has ever reported for this key -
-              // adopt it silently. Comparing it against defaultSettings()'s
-              // hardcoded placeholder (charge: true) isn't a real "BMS
-              // changed something" event, just this pack's local state
-              // catching up to what Firebase already held - logging it as
-              // "Changed by BMS" was misleading (and, worse, produced a
-              // burst of spurious log lines while the socket connection was
-              // still settling on first load).
               guard.seeded = true;
-            } else if (next[pack.id] && value !== next[pack.id][dashKey]) {
-              // Already seeded, no write of ours is pending, yet Firebase
-              // now holds a different value than what's on screen - the
-              // only other party that can write .../settings/charge|
-              // discharge is the BMS/bridge itself (e.g. a protection trip,
-              // or a reboot echoing its real MOSFET state), so this is a
-              // legitimate externally-sourced change, not a race - accept it.
-              logSwitchChange(dashKey, "Changed by BMS", value);
             }
           }
-
           patch[dashKey] = value;
         }
         next[pack.id] = { ...next[pack.id], ...patch };
       }
       return next;
     });
-  }, [
-    bms0.remoteSettings,
-    bms1.remoteSettings,
-    bms2.remoteSettings,
-    bms3.remoteSettings,
-    bms4.remoteSettings,
-    bms5.remoteSettings,
-    bms6.remoteSettings,
-    bms7.remoteSettings,
-    bms8.remoteSettings,
-    bms9.remoteSettings,
-  ]);
+  }, [bms0.remoteSettings, bms1.remoteSettings, bms2.remoteSettings, bms3.remoteSettings, bms4.remoteSettings, bms5.remoteSettings, bms6.remoteSettings, bms7.remoteSettings, bms8.remoteSettings, bms9.remoteSettings]);
 
-  // Volt Calibration has no real settings field of its own yet - seed its
-  // local value from the real status.battery_voltage reading ONCE per pack
-  // (only while still at the untouched 0 default), so Configuration opens
-  // showing a real starting point instead of 0/a guessed constant. Doesn't
-  // continuously rebind after that - that would fight anyone actively
-  // typing a new value (the "pull" button in Configuration covers on-demand
-  // re-sync instead).
-  useEffect(() => {
-    setSettingsByPack((s) => {
-      let changed = false;
-      const next = { ...s };
-      for (const pack of packs) {
-        const raw = pack.batteryVoltageRaw;
-        if (typeof raw !== "number" || !Number.isFinite(raw)) continue;
-        if (next[pack.id]?.voltCalibration !== 0) continue;
-        next[pack.id] = { ...next[pack.id], voltCalibration: raw };
-        changed = true;
-      }
-      return changed ? next : s;
-    });
-  }, [
-    bms0.batteryVoltageRaw,
-    bms1.batteryVoltageRaw,
-    bms2.batteryVoltageRaw,
-    bms3.batteryVoltageRaw,
-    bms4.batteryVoltageRaw,
-    bms5.batteryVoltageRaw,
-    bms6.batteryVoltageRaw,
-    bms7.batteryVoltageRaw,
-    bms8.batteryVoltageRaw,
-    bms9.batteryVoltageRaw,
-  ]);
-
-  // Single write-path for every Configuration row (toggle, input+OK, or
-  // dropdown+OK). Updates local state immediately; for the live pack it also
-  // pushes to `${path}/settings/${key}` in Firebase. NOTE: that sub-path is a
-  // guess - confirm it's actually what your ESP32 firmware listens to for
-  // remote config writes (vs. e.g. a structured "cmd" node), and adjust here
-  // if not.
-  //
-  // Blocked entirely (no local state change, no Firebase write) when Admin
-  // Monitor has disabled this device - the Configuration button is also
-  // disabled below so the panel shouldn't normally even be open in this
-  // state, but this guard covers it regardless of how saveSetting gets
-  // called (e.g. a modal left open from before the toggle flipped).
   const saveSetting = (key, value) => {
     if (active.isLive && active.adminDisabled) return;
     if (key === "charge" || key === "discharge") {
-      // Arm the write-guard BEFORE the Firebase write goes out, so a poll
-      // that lands between now and the write actually completing can't
-      // clobber this - see chargeSwitchGuardRef above and the sync effect.
       if (!chargeSwitchGuardRef.current[activeBmsId]) chargeSwitchGuardRef.current[activeBmsId] = {};
       if (!chargeSwitchGuardRef.current[activeBmsId][key]) {
         chargeSwitchGuardRef.current[activeBmsId][key] = { pending: undefined, seeded: true };
       }
-      // A user-initiated write always counts as "seeded" too - once the
-      // user has touched this switch, any future differing value is by
-      // definition a change from what's on screen, real seed or not.
       chargeSwitchGuardRef.current[activeBmsId][key].pending = value;
       chargeSwitchGuardRef.current[activeBmsId][key].seeded = true;
       logSwitchChange(key, "Changed by USER", value);
@@ -640,7 +398,6 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
         .saveSetting(activeConfig.hubId, activeConfig.bmsKey, fbKey, fbValue)
         .then(() => setSaveError(null))
         .catch((err) => {
-          console.error(`Failed to save "${key}"`, err);
           setSaveError(err.message || "Failed to save setting");
         });
     }
@@ -651,42 +408,19 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
     return () => clearInterval(id);
   }, []);
 
-  // --- Config-driven derived values (the "State Driven" / "Auto-Calc" requirements) ---
-  // Capacity is a settings value now, not a fixed constant: remaining Ah is the
-  // physical ground truth from the simulation, so SOC% recalculates instantly
-  // whenever Capacity changes. Cell Count is surfaced in labels only - it isn't
-  // folded into the SOC formula, since series cell count doesn't change how much
-  // charge (Ah) a pack holds.
   const effectiveCapacityAh = settings.capacityAh;
   const displaySoc = clamp((active.remainingAh / effectiveCapacityAh) * 100, 0, 100);
-  // Recommended charge/discharge current: 0.25C / 0.5C of rated capacity
-  // respectively, per request - a conservative, chemistry-agnostic rule of
-  // thumb rather than a per-cell datasheet limit (the app doesn't have
-  // per-cell datasheet data to work from).
   const recommendedChargeCurrentA = effectiveCapacityAh * 0.25;
   const recommendedDischargeCurrentA = effectiveCapacityAh * 0.5;
-
   const balDeltaVolt = settings.balDeltaVolt;
   const vd = voltDiffToneWithThreshold(active.voltDiffMv, balDeltaVolt);
 
-  // Live packs have no write-back path yet, so their MOS/Balancer status
-  // lights reflect real hardware telemetry, not the Settings toggles. Every
-  // pack is live now, so the `: settings.x` side of these never actually
-  // runs - kept as a fallback in case a non-live pack shape returns.
   const chargeMOS = active.isLive ? active.chargeMOS : settings.charge;
   const dischargeMOS = active.isLive ? active.dischargeMOS : settings.discharge;
   const chargeStatus = active.isLive ? active.chargeStatus : null;
   const balancerOn = active.isLive ? active.balancerOn : settings.balancer;
-
-  // Charging uses the (typically stricter) Charge OTP limit, otherwise the
-  // Discharge OTP limit - matches which protection would actually trip.
   const otpLimit = active.status === "Charging" ? settings.chgOtp : settings.dsgOtp;
 
-  // 5-factor composite (SOC range 40 / cell balance 20 / temperature 20 /
-  // alarm-fault 10 / current 10) - see batteryHealthScore.js for the exact
-  // per-factor breakpoints. Reuses activeAlarms (the same live threshold
-  // panel already shows) and the BMS's own configured current limits, not
-  // app-invented thresholds.
   const healthScore = computeBatteryHealthScore({
     soc: displaySoc,
     voltDiffMv: active.voltDiffMv,
@@ -697,11 +431,6 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
     contDsgCurr: settings.contDsgCurr,
   });
 
-  // Fill bar is scaled against the actual UVP-OVP protection window, not the
-  // pack's own min/max spread - a healthy 4S LiFePO4 pack sitting at ~3.1V
-  // (UVP 2.50V / OVP 3.65V) should read as roughly half-full, not "nearly
-  // empty to nearly full" just because all 4 cells happen to be within a
-  // few mV of each other.
   const cellFillPct = useCallback(
     (v) => {
       const span = settings.cellOvp - settings.cellUvp || 0.02;
@@ -710,49 +439,11 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
     [settings.cellOvp, settings.cellUvp]
   );
 
-  // Every pack is live now and needs BOTH signals to count as Online:
-  // - firebaseConnected: the browser's own Socket.IO connection to our
-  //   backend (see HubDataContext.jsx's socket "connect"/"disconnect") -
-  //   not a real Firebase presence path, just "is our own live-data
-  //   channel up at all" (this name is a holdover from an earlier design).
-  // - fresh data: status genuinely changed within the last 15s. Confirmed
-  //   live (2026-07-27, BLE physically unplugged) that jkbms-bridge.yaml
-  //   stops writing to Firebase entirely when the BLE link drops - the
-  //   value freezes byte-for-byte rather than re-pushing on a heartbeat -
-  //   so a real content change is the correct liveness signal here, not
-  //   "did our backend's 5s poll deliver a message" (it always does,
-  //   frozen data included). This is purely the Offline-detection
-  //   threshold - the displayed values themselves still refresh as fast
-  //   as the data can move: the backend polls Firebase every 5s
-  //   (realtime.js's REST_POLL_MS), matching jkbms-bridge.yaml's own ~5s
-  //   push cadence, so there's nothing more real-time to extract there.
-  //   90s: confirmed live (2026-07-28) that info.uptime_seconds only
-  //   actually changes in ~60s jumps (an ESPHome sensor on its own
-  //   60s update_interval, independent of the 5s Firebase push cadence),
-  //   and status can legitimately stay byte-identical for 40+s on a
-  //   genuinely connected but numerically-stable device (idle SOC, steady
-  //   current). A shorter threshold was flipping Online devices to Offline
-  //   just because neither signal happened to move within the window, not
-  //   because the device was actually gone - 90s comfortably clears that
-  //   ~60s quantization with margin for poll jitter. A tighter threshold
-  //   than this isn't achievable from content-diffing alone without the
-  //   ESP32 itself writing a real per-push heartbeat field, which is out
-  //   of scope (ESP32 firmware/protocol changes weren't requested).
-  // เพิ่มเป็น 1 นาที (ถ้าเกิน 60s ไม่ส่งข้อมูล ให้ Offline ทันที) ตามคำขอ
-const STALE_AFTER_MS = 60000;
+  const STALE_AFTER_MS = 15000;
+  const isOnline = active.isLive
+    ? !!active.firebaseConnected && !!active.lastUpdateAt && (now.getTime() - active.lastUpdateAt < STALE_AFTER_MS)
+    : false;
 
-const isOnline = active.isLive
-  ? !!active.firebaseConnected &&
-    !!active.lastUpdateAt &&
-    (now.getTime() - active.lastUpdateAt < STALE_AFTER_MS)
-  : false; // ถ้าไม่ใช่ Live Data ให้ default เป็น Offline (false)
-
-  // Auto-pops when the active pack goes offline, asking the user to
-  // refresh - but only after 5s of SUSTAINED offline, not the instant
-  // isOnline flips false. A brief blip that recovers on its own shouldn't
-  // interrupt anyone; the effect's cleanup cancels the pending timer the
-  // moment isOnline goes back true before it fires, so nothing shows at all
-  // for a quick reconnect.
   const [confirmedOffline, setConfirmedOffline] = useState(false);
   useEffect(() => {
     if (isOnline) {
@@ -763,331 +454,520 @@ const isOnline = active.isLive
     return () => clearTimeout(timer);
   }, [isOnline]);
 
-  // Dismissible (closing it shouldn't force it back open every render while
-  // still offline), but resets once we're back online - so a fresh
-  // disconnect later pops it again instead of staying silenced forever.
-  // Debounced the same 5s as confirmedOffline (not the instant isOnline
-  // flips true): a flapping connection that reconnects only to drop again
-  // moments later used to re-arm the dismissal instantly, popping the modal
-  // right back up - annoying, reported live as "alerts too often". Requiring
-  // 5s of SUSTAINED online before resetting the dismissal fixes that.
   const [offlineDismissed, setOfflineDismissed] = useState(false);
-  useEffect(() => {
-    if (!isOnline) return;
-    const timer = setTimeout(() => setOfflineDismissed(false), 5000);
-    return () => clearTimeout(timer);
-  }, [isOnline]);
   const showOfflineModal = active.isLive && confirmedOffline && !offlineDismissed;
-
+  const [isOpen, setIsOpen] = React.useState(false);
+  
   return (
-      <div className="mx-auto max-w-7xl px-3 py-4 sm:px-5 sm:py-6 md:px-7">
-      {!hubLoaded ? (
-        <div className="flex items-center justify-center p-16 text-sm text-[var(--muted-foreground)]">
-          กำลังโหลดข้อมูลอุปกรณ์...
-        </div>
-      ) : devices.length === 0 ? (
-        <div className="flex flex-col items-center justify-center gap-2 rounded-3xl bg-[var(--card)] p-16 text-center shadow-sm ring-1 ring-[var(--border)]">
-          <p className="text-lg font-bold text-[var(--foreground)]">ยังไม่พบอุปกรณ์ BMS ที่เชื่อมกับบัญชีนี้</p>
-        </div>
-      ) : (
-        <>
-        <FirmwareUpdateToast update={firmwareUpdate} />
-        {/* Top Bar: BMS 1-N (left) + System Log / Configuration (right) */}
-        <TopBar
-          tabs={slots
-            .filter((s) => s.live)
-            .map((s) => {
-              const pack = packs.find((p) => p.id === s.id);
-              return { id: s.id, name: s.name, mac: pack?.info?.jk_mac_address || s.deviceKey };
-            })}
-          activeBmsId={activeBmsId}
-          onSelectBms={setActiveBmsId}
-          onOpenWeather={() => {
-            setShowWeatherModal(true);
-            weatherLoc.openWeather();
-          }}
-          onOpenConfig={() => setShowConfig(true)}
-          configDisabled={active.isLive && active.adminDisabled}
-          onLogout={() => setIsLogoutModalOpen(true)}
-        />
-        <AnnouncementBanner />
-        <LogoutModal
-            isOpen={isLogoutModalOpen}
-            onClose={() => setIsLogoutModalOpen(false)}
-            onConfirm={logout}
-        />
-        {active.isLive && active.adminDisabled ? (
-          <div className="mt-5 flex flex-col items-center justify-center gap-2 rounded-3xl bg-[var(--card)] p-16 text-center shadow-sm ring-1 ring-[var(--border)]">
-            <p className="text-lg font-bold text-[var(--foreground)]">ถูกปิดโดย Admin</p>
-            <p className="max-w-sm text-sm text-[var(--muted-foreground)]">
-              หากติดปัญหา กรุณาติดต่อ ID Line: Poote3105
-            </p>
+      <div className="mx-auto max-w-7xl px-3 py-4 sm:px-5 sm:py-6 md:px-7 font-sans">
+        {!hubLoaded ? (
+          <div className="flex items-center justify-center p-16 text-sm text-[var(--muted-foreground)]">
+            กำลังโหลดข้อมูลอุปกรณ์...
+          </div>
+        ) : devices.length === 0 ? (
+          <div className="flex flex-col items-center justify-center gap-2 rounded-3xl bg-[var(--card)] p-16 text-center shadow-sm ring-1 ring-[var(--border)]">
+            <p className="text-lg font-bold text-[var(--foreground)]">ยังไม่พบอุปกรณ์ BMS ที่เชื่อมกับบัญชีนี้</p>
           </div>
         ) : (
           <>
-            {/* JK BMS Control Center - Main Console Panel (Power & Energy + Remaining & Health) */}
-            <SystemHero
-              deviceLabel={activeDeviceLabel}
-              deviceMac={activeDeviceMac}
-              hubAccount={active.isLive ? activeConfig.hubId : undefined}
-              isOnline={isOnline}
-              onRefresh={() => window.location.reload()}
-              cellCount={settings.cellCount}
-              batteryType={active.info?.battery_type}
-              maxBalancerCurrentA={settings.maxBalCurrent}
-              power={active.power}
-              status={active.status}
-              info={active.info}
-              current={active.current}
-              packVoltage={active.packVoltage}
-              ratedCapacityAh={effectiveCapacityAh}
-              remainingAh={active.remainingAh}
-              socPercent={displaySoc}
-              cellAvgVoltage={active.cells.length ? active.cells.reduce((a, b) => a + b, 0) / active.cells.length : 0}
-              soh={active.soh}
-              healthScore={healthScore}
-              chargedAh={activeEnergy.chargedAh}
-              dischargedAh={activeEnergy.dischargedAh}
-              chargeMOS={chargeMOS}
-              dischargeMOS={dischargeMOS}
-              chargeStatus={chargeStatus}
-              balancerOn={balancerOn}
-              balancerCurrentA={active.balancerCurrent}
-              voltDiffMv={active.voltDiffMv}
-              voltDiffTone={vd.tone}
-              now={now}
-              alarms={activeAlarms}
-              onOpenAlarms={() => setShowAlarms(true)}
-                                      />
+            <FirmwareUpdateToast update={firmwareUpdate} />
+            <TopBar
+              tabs={slots
+                .filter((s) => s.live)
+                .map((s) => {
+                  const pack = packs.find((p) => p.id === s.id);
+                  return { id: s.id, name: s.name, mac: pack?.info?.jk_mac_address || s.deviceKey };
+                })}
+              activeBmsId={activeBmsId}
+              onSelectBms={setActiveBmsId}
+              onOpenWeather={() => {
+                setShowWeatherModal(true);
+                weatherLoc.openWeather();
+              }}
+              onOpenConfig={() => setShowConfig(true)}
+              configDisabled={active.isLive && active.adminDisabled}
+              onLogout={() => setIsLogoutModalOpen(true)}
+            />
+            <AnnouncementBanner />
+            <LogoutModal isOpen={isLogoutModalOpen} onClose={() => setIsLogoutModalOpen(false)} onConfirm={logout} />
 
-           {/* Power Flow: Card 1 shows Temperature/Cycle Info (moved in from
-               SensorRow.jsx, replacing the old Charge Rate card); Card 3 shows
-               just the recommended/configured current limits for both
-               directions (the live Discharge Rate readout was removed),
-               per explicit request. */}
-            <div className="mt-3 space-y-5">
-             <PowerFlowChart
-               current={active.current}
-               socPercent={displaySoc}
-               remainingRuntime={active.remainingRuntime}
-               timeToFullCharge={active.timeToFullCharge}
-               recommendedChargeCurrentA={recommendedChargeCurrentA}
-               recommendedDischargeCurrentA={recommendedDischargeCurrentA}
-               configuredChargeCurrentA={settings.contChgCurr}
-               configuredDischargeCurrentA={settings.contDsgCurr}
-               history={active.powerHistory}
-               channels={active.tempChannels}
-               temps={active.temps}
-               maxTemp={active.maxTemp}
-               otpLimit={otpLimit}
-               cycleAh={active.cycleAh}
-               cycleCount={active.cycleCount}
-             />
-                                      </div>
+            {active.isLive && active.adminDisabled ? (
+              <div className="mt-5 flex flex-col items-center justify-center gap-2 rounded-3xl bg-[var(--card)] p-16 text-center shadow-sm ring-1 ring-[var(--border)]">
+                <p className="text-lg font-bold text-[var(--foreground)]">ถูกปิดโดย Admin</p>
+                <p className="max-w-sm text-sm text-[var(--muted-foreground)]">หากติดปัญหา กรุณาติดต่อ ID Line: Poote3105</p>
+              </div>
+            ) : (
+              <>
+            {/* 🌟 Background Flow Diagram Container (Pro Control Room Edition พร้อมปุ่มพับซ่อน) */}
+              <div className="my-6 relative w-full mx-auto overflow-hidden bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 rounded-3xl border border-slate-800/80 shadow-2xl p-5 md:p-6 ring-1 ring-slate-800/50">
+                
+                {/* Ambient Glow Background Accents */}
+                <div className="absolute -top-24 -left-24 w-72 h-72 bg-sky-500/10 rounded-full blur-3xl pointer-events-none"></div>
+                <div className="absolute -bottom-24 -right-24 w-72 h-72 bg-amber-500/10 rounded-full blur-3xl pointer-events-none"></div>
 
-        <div className="mt-3 space-y-5">
+                {/* Header Section (คลิกเพื่อแสดง/ซ่อนได้) */}
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4 relative z-10">
+                  <button 
+                    onClick={() => setIsOpen(!isOpen)}
+                    className="group inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-900/90 border border-slate-700/60 text-amber-400 text-xs font-semibold shadow-inner hover:border-amber-500/50 transition-all cursor-pointer"
+                  >
+                    <Zap className="size-3.5 text-amber-400 animate-pulse" /> 
+                    <span>Solar Hybrid Energy Flow</span>
+                    <span className={`text-[10px] text-slate-400 ml-1 transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`}>▼</span>
+                  </button>
 
-                                          {/* Section 2: Cell Voltage Monitoring - wire/connector resistance
-              (wiring/busbar connection quality per cell tap, NOT the cell's
-              own internal resistance) is folded into each cell tile below,
-              labeled "Wire" with a plug icon so it can't be mistaken for the
-              cell's IR. */}
-                                          <section className="rounded-2xl bg-[var(--card)] p-5 shadow-sm ring-1 ring-[var(--border)] md:p-6">
-                                              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                                                  <div>
-                                                      <h2 className="text-sm font-semibold text-[var(--foreground)]">
-                                                          Cell Voltage Monitoring · {settings.cellCount}S
-                                                      </h2>
-                                                      {active.wireResistances?.some((r) => typeof r === "number" && r > 0) && (
-                                                          <p className="mt-0.5 flex items-center gap-1 text-[10px] text-[var(--muted-foreground)]">
-                                                              <Cable className="size-3" />
-                                                              "Wire" = wiring/busbar connection resistance per cell tap, not the cell's own internal resistance (IR)
-                                                          </p>
-                                                      )}
-                                                  </div>
-                                                  <div className="flex flex-wrap items-center gap-2">
-                                                      <Pill tone="warning" icon={ArrowUpRight}>
-                                                          Max C{active.maxIdx + 1} · {active.maxV.toFixed(3)}V
-                                                      </Pill>
-                                                      <Pill tone="info" icon={ArrowDownRight}>
-                                                          Min C{active.minIdx + 1} · {active.minV.toFixed(3)}V
-                                                      </Pill>
-                                                      <Pill tone={vd.tone}>ΔV {active.voltDiffMv}mV</Pill>
-                                                  </div>
-                                              </div>
+                  <div className="flex items-center gap-2.5 bg-slate-900/80 border border-slate-800/90 px-3.5 py-1.5 rounded-xl shadow-sm">
+                    <span className="size-2.5 rounded-full bg-emerald-400 animate-ping"></span>
+                    <span className="text-xs text-slate-300 font-medium">System Bus: <strong className="text-white font-mono">{avgPackVoltage.toFixed(2)}V</strong></span>
+                  </div>
+                </div>
 
-                                              <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10">
-                                                  {active.cells.map((v, i) => {
-                                                      const isMax = i === active.maxIdx;
-                                                      const isMin = i === active.minIdx;
-                                                      const pct = cellFillPct(v);
-                                                      const isOverVoltage = v > settings.cellOvp;
-                                                      const isUnderVoltage = v < settings.cellUvp;
-                                                      const isBreach = isOverVoltage || isUnderVoltage;
-                                                      const tone = isBreach ? "critical" : isMax ? "warning" : isMin ? "info" : null;
-                                                      const t = tone ? statusTone(tone) : null;
-                                                      const fillColor = t ? t.stroke : "var(--brand)";
-                                                      const ohm = active.wireResistances?.[i];
-                                                      const hasWireValue = typeof ohm === "number" && ohm > 0;
-                                                      const badge = isBreach ? (isOverVoltage ? "OVP" : "UVP") : isMax ? "MAX" : isMin ? "MIN" : null;
+                {/* Content Wrapper (ซ่อน/แสดงตามสถานะ isOpen) */}
+                <div className={`transition-all duration-500 ease-in-out overflow-hidden ${isOpen ? 'max-h-[1000px] opacity-100' : 'max-h-0 opacity-0'}`}>
+                  
+                  {/* Background Schematic Image Wrapper */}
+                  <div className="relative w-full aspect-[16/9] sm:aspect-[2/1] max-h-[500px] rounded-2xl overflow-hidden bg-slate-950 border border-slate-800/60 shadow-inner">
+                    
+                    {/* Background Schematic Image with High-Tech Filter */}
+                    <div 
+                      className="absolute inset-0 bg-cover bg-center opacity-40 mix-blend-luminosity filter contrast-125 scale-105 transition-transform duration-700"
+                      style={{ backgroundImage: `url('flow-main.jpg')` }}
+                    ></div>
+                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/40 to-transparent"></div>
 
-                                                      return (
-                                                          <div
-                                                              key={i}
-                                                              className={`relative rounded-lg p-1 text-center ring-1 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md ${t ? `${t.bg} ring-[var(--border)]` : "bg-[var(--card)] ring-[var(--border)]"
-                                                                  }`}
-                                                          >
-                                                              {badge && (
-                                                                  <span
-                                                                      className={`absolute -right-1 -top-1 rounded-full px-1 py-0.5 text-[7px] font-bold text-white shadow-sm ${isBreach ? "animate-pulse" : ""}`}
-                                                                      style={{ backgroundColor: isBreach ? "var(--critical)" : isMax ? "var(--warning)" : "var(--info)" }}
-                                                                  >
-                                                                      {badge}
-                                                                  </span>
-                                                              )}
+                    {/* ประเมินทิศทางและการไหลจากค่ากำลังไฟฟ้าและกระแสจริง */}
+                    {(() => {
+                      const now = new Date();
+                      const currentHour = now.getHours();
+                      const currentMinute = now.getMinutes();
+                      const currentTimeNumber = currentHour * 60 + currentMinute; 
 
-                                                              <div className={`text-[9px] font-semibold ${t ? t.fg : "text-[var(--muted-foreground)]"}`}>
-                                                                  C{i + 1}
-                                                              </div>
+                      const isDaytime = currentTimeNumber >= 420 && currentTimeNumber <= 1079;
+                      
+                      const rawPower = totalAggregatedPower;
+                      const rawCurrent = totalAggregatedCurrent;
 
-                                                              <div className="text-xs font-bold text-[var(--foreground)] tabular-nums">{v.toFixed(3)}</div>
+                      // เช็คสถานะจากการไหลของพลังงานจริงโดยตรง (ไม่ต้องพึ่งตัวแปรภายนอกที่อาจไม่ได้ประกาศ)
+                      const isChargingActive = rawPower > 0 || rawCurrent > 0;
+                      const isDischargingActive = rawPower < 0 || rawCurrent < 0;
 
-                                                              <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-[var(--border)]">
-                                                                  <div
-                                                                      className="h-full rounded-full transition-all duration-500"
-                                                                      style={{ width: `${pct}%`, backgroundColor: fillColor }}
-                                                                  />
-                                                              </div>
+                      const isSolarFlowing = isDaytime && isChargingActive;
+                      const isLoadFlowing = true; // โหลดทำงานและวิ่งออกจากอินเวอร์เตอร์ตลอด
 
-                                                              {hasWireValue && (
-                                                                  <div className="mt-0.5 flex items-center justify-center gap-0.5 text-[8px] text-[var(--muted-foreground)]">
-                                                                      <Cable className="size-2" />
-                                                                      {Math.round(ohm * 1000)}mΩ
-                                                                  </div>
-                                                              )}
-                                                          </div>
-                                                      );
-                                                  })}
-                                              </div>
-                                          </section>
+                      // สีและแอนิเมชันของเส้นแบตเตอรี่ <-> อินเวอร์เตอร์
+                      let batteryAnimationValue = "none";
+                      let batteryStrokeColor = "#2dd4bf";
 
-          
-          {/* ✅ แก้เป็นแบบนี้ */}
-          <ChargeDischargeChart history={active.powerHistory} hubId={activeConfig.hubId} bmsKey={activeConfig.bmsKey} />
-          {/* Communication: CAN / UART1-3 protocol status */}
-          <CommunicationPanel remoteSettings={active.remoteSettings} />
-        </div>
+                      if (isChargingActive) {
+                        // กำลังชาร์จเข้า (วิ่งย้อนเข้าแบต)
+                        batteryAnimationValue = "dash_reverse 1.5s linear infinite"; 
+                        batteryStrokeColor = "#38bdf8"; 
+                      } else if (isDischargingActive || !isChargingActive) {
+                        // กำลังจ่ายออก (วิ่งออกจากแบตมาอินเวอร์เตอร์)
+                        batteryAnimationValue = "dash_forward 1.5s linear infinite"; 
+                        batteryStrokeColor = "#2dd4bf"; 
+                      }
 
-        <p className="mt-5 text-center text-[11px] text-[var(--muted-foreground)]">
-          Live telemetry from Firebase RTDB · viewing {active.name}
-        </p>
+                      return (
+                        <svg className="absolute inset-0 w-full h-full pointer-events-none z-10 filter drop-shadow-[0_0_8px_rgba(56,189,248,0.4)]" viewBox="0 0 1000 600" preserveAspectRatio="none">
+                          {/* 1. Solar PV Array -> Hybrid Inverter */}
+                          <path
+                            d="M 480 130 L 480 230 L 280 230"
+                            fill="none"
+                            stroke="#fbbf24"
+                            strokeWidth="5"
+                            strokeDasharray="12 12"
+                            style={{ animation: isSolarFlowing ? "dash_forward 2s linear infinite" : "none", opacity: isSolarFlowing ? 0.9 : 0.15 }}
+                          />
+
+                          {/* 2. Battery Bank <-> Inverter */}
+                          <path
+                            d="M 310 520 Q 220 520, 220 400 L 220 280"
+                            fill="none"
+                            stroke={batteryStrokeColor}
+                            strokeWidth="5"
+                            strokeDasharray="12 12"
+                            style={{ animation: batteryAnimationValue, opacity: 0.9 }}
+                          />
+
+                          {/* 3. Inverter -> Home Load */}
+                          <path
+                            d="M 280 230 L 450 230 L 650 300"
+                            fill="none"
+                            stroke="#fb923c"
+                            strokeWidth="5"
+                            strokeDasharray="12 12"
+                            style={{ animation: isLoadFlowing ? "dash_forward 2s linear infinite" : "none", opacity: 0.9 }}
+                          />
+                        </svg>
+                      );
+                    })()}
+
+                   {/* Absolute Modern Glassmorphism Cards Overlays (Responsive Mobile Optimized) */}
+                    {(() => {
+                      const now = new Date();
+                      const currentHour = now.getHours();
+                      const currentMinute = now.getMinutes();
+                      const currentTimeNumber = currentHour * 60 + currentMinute; 
+                      const isDaytime = currentTimeNumber >= 420 && currentTimeNumber <= 1079;
+                      const rawPower = Math.abs(totalAggregatedPower > 0 ? totalAggregatedPower : 0);
+                      
+                      let solarCurrent = isDaytime ? rawPower : 0.0;
+                     const totalPower = totalAggregatedPower; // กำลังจากแบตเตอรี่ (ถ้าชาร์จเป็นบวก, ถ้าจ่ายออกเป็นลบ)
+// สมมติว่ามีตัวแปร solarPower หรือคำนวณจากช่วงเวลา
+const currentSolarPower = isDaytime ? Math.abs(totalPower > 0 ? totalPower : 0) : 0;
+
+// คำนวณโหลดที่บ้านกำลังดึงไปใช้งาน (W)
+const loadConsumptionPower = totalPower < 0 ? Math.abs(totalPower) : 0;
+
+                      return (
+                        <>
+                          {/* 1. PV Array Box */}
+                          <div className="absolute top-[15%] left-[48%] -translate-x-1/2 bg-slate-900/90 backdrop-blur-xl border border-amber-500/30 px-2.5 py-1 sm:px-3.5 sm:py-1.5 rounded-lg sm:rounded-xl text-center z-20 shadow-xl shadow-amber-950/20">
+                            <div className="text-[8px] sm:text-[9px] uppercase tracking-widest font-bold text-amber-400">Solar PV</div>
+                            <div className="text-xs sm:text-sm font-extrabold text-white font-mono">{solarCurrent.toFixed(1)} W</div>
+                          </div>
+
+                          {/* 2. Hybrid Inverter Box */}
+                          <div className="absolute top-[41%] left-[20%] -translate-x-1/2 -translate-y-1/2 bg-slate-900/90 backdrop-blur-xl border border-sky-500/30 px-3 py-1 sm:px-5 sm:py-1.5 rounded-lg sm:rounded-xl text-center z-20 shadow-xl shadow-sky-950/20 min-w-[90px] sm:min-w-[110px]">
+                            <div className="text-[8px] sm:text-[9px] uppercase tracking-widest font-bold text-sky-400">Inverter</div>
+                            <div className="text-xs sm:text-sm font-extrabold text-white font-mono">{totalAggregatedPower.toFixed(0)} W</div>
+                          </div>
+
+                          {/* 3. Critical Loads Panel */}
+                          <div className="absolute top-[50%] right-[32%] -translate-y-1/2 bg-slate-900/90 backdrop-blur-xl border border-indigo-500/30 px-2.5 py-1 sm:px-3.5 sm:py-1.5 rounded-lg sm:rounded-xl text-center z-20 shadow-xl shadow-indigo-950/20">
+                            <div className="text-[8px] sm:text-[9px] uppercase tracking-widest font-bold text-indigo-400">Loads</div>
+                            <div className="text-xs sm:text-sm font-extrabold text-white font-mono">{loadConsumptionPower.toFixed(1)} W</div>
+                          </div>
+
+                          {/* 4. Battery Bank Box */}
+                          <div className="absolute bottom-[8%] left-[33%] -translate-x-1/2 bg-slate-900/95 backdrop-blur-xl border border-teal-500/40 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl sm:rounded-2xl text-center z-20 shadow-xl shadow-teal-950/30 min-w-[140px] sm:min-w-[180px] ring-1 ring-teal-500/20">
+                            <div className="flex items-center justify-center gap-1 mb-0.5">
+                              <span className="size-1.5 sm:size-2 rounded-full bg-teal-400 animate-pulse"></span>
+                              <span className="text-[8px] sm:text-[10px] uppercase tracking-wider font-bold text-teal-400">Battery Bank</span>
+                            </div>
+                            
+                            <div className="text-xs sm:text-base font-extrabold text-white font-mono tracking-tight my-0.5">
+                              {displaySoc.toFixed(0)}% 
+                              <span className="text-[9px] sm:text-xs text-slate-400 font-normal ml-0.5 sm:ml-1">
+                                ({totalRemainingAh.toFixed(1)}/{totalCapacityAh.toFixed(0)}Ah)  
+                                 <div className="inline-block px-1.5 py-0.5 rounded bg-teal-500/10 border border-teal-500/20 text-[10px] sm:text-[11px] font-bold text-teal-300 font-mono">
+                              {totalAggregatedCurrent > 0 ? `+${totalAggregatedCurrent.toFixed(1)}` : totalAggregatedCurrent.toFixed(1)} A
+                            </div>
+                              </span>
+                            </div>
+
+                           
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Sub-Metrics Cards Footer */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
+                    <div className="bg-slate-900/70 border border-slate-800/80 p-3 rounded-2xl flex items-center justify-between shadow-sm backdrop-blur-sm">
+                      <div>
+                        <div className="text-[11px] font-medium text-slate-400">Estimated Backup</div>
+                        <div className="text-sm font-bold text-amber-400 font-mono mt-0.5">
+                          {remainingHours > 0 ? `${remHoursInt} ชม. ${remMinutesInt} น.` : `--`}
+                        </div>
+                      </div>
+                      <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20 text-base">⏳</div>
+                    </div>
+                    
+                    <div className="bg-slate-900/70 border border-slate-800/80 p-3 rounded-2xl flex items-center justify-between shadow-sm backdrop-blur-sm">
+                      <div>
+                        <div className="text-[11px] font-medium text-slate-400">Net Battery Power</div>
+                        <div className="text-sm font-bold text-teal-400 font-mono mt-0.5">{totalAggregatedPower.toFixed(0)} W</div>
+                      </div>
+                      <div className="p-2 rounded-xl bg-teal-500/10 text-teal-400 border border-teal-500/20 text-base">🔋</div>
+                    </div>
+                    
+                    <div className="bg-slate-900/70 border border-slate-800/80 p-3 rounded-2xl flex items-center justify-between shadow-sm backdrop-blur-sm">
+                      <div>
+                        <div className="text-[11px] font-medium text-slate-400">Active Home Load</div>
+                        <div className="text-sm font-bold text-indigo-400 font-mono mt-0.5">
+                          {(() => {
+                            const now = new Date();
+                            const currentHour = now.getHours();
+                            const currentMinute = now.getMinutes();
+                            const isNight = (currentHour * 60 + currentMinute) >= 1080;
+                            return isNight ? Math.abs(totalAggregatedPower > 0 ? totalAggregatedPower : 0).toFixed(0) : "0";
+                          })()} W
+                        </div>
+                      </div>
+                      <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-base">💡</div>
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* Keyframes */}
+                <style>{`
+                  @keyframes dash_forward {
+                    from { stroke-dashoffset: 50; }
+                    to { stroke-dashoffset: 0; }
+                  }
+                  @keyframes dash_reverse {
+                    from { stroke-dashoffset: 0; }
+                    to { stroke-dashoffset: 50; }
+                  }
+                `}</style>
+              </div>
+                <SystemHero
+                  deviceLabel={activeDeviceLabel}
+                  deviceMac={activeDeviceMac}
+                  hubAccount={active.isLive ? activeConfig.hubId : undefined}
+                  isOnline={isOnline}
+                  onRefresh={() => window.location.reload()}
+                  cellCount={settings.cellCount}
+                  batteryType={active.info?.battery_type}
+                  maxBalancerCurrentA={settings.maxBalCurrent}
+                  power={active.power}
+                  status={active.status}
+                  info={active.info}
+                  current={active.current}
+                  packVoltage={active.packVoltage}
+                  ratedCapacityAh={effectiveCapacityAh}
+                  remainingAh={active.remainingAh}
+                  socPercent={displaySoc}
+                  cellAvgVoltage={active.cells.length ? active.cells.reduce((a, b) => a + b, 0) / active.cells.length : 0}
+                  soh={active.soh}
+                  healthScore={healthScore}
+                  chargedAh={activeEnergy.chargedAh}
+                  dischargedAh={activeEnergy.dischargedAh}
+                  chargeMOS={chargeMOS}
+                  dischargeMOS={dischargeMOS}
+                  chargeStatus={chargeStatus}
+                  balancerOn={balancerOn}
+                  balancerCurrentA={active.balancerCurrent}
+                  voltDiffMv={active.voltDiffMv}
+                  voltDiffTone={vd.tone}
+                  now={now}
+                  alarms={activeAlarms}
+                  onOpenAlarms={() => setShowAlarms(true)}
+                />
+
+                <div className="mt-5 space-y-5">
+                  <PowerFlowChart
+                    packVoltage={active.packVoltage}
+                    current={active.current}
+                    chargedAh={activeEnergy.chargedAh}
+                    dischargedAh={activeEnergy.dischargedAh}
+                    chargedWh={dailyEnergy.chargedWh}
+                    dischargedWh={dailyEnergy.dischargedWh}
+                    socPercent={displaySoc}
+                    remainingRuntime={active.remainingRuntime}
+                    timeToFullCharge={active.timeToFullCharge}
+                    recommendedChargeCurrentA={recommendedChargeCurrentA}
+                    recommendedDischargeCurrentA={recommendedDischargeCurrentA}
+                    configuredChargeCurrentA={settings.contChgCurr}
+                    configuredDischargeCurrentA={settings.contDsgCurr}
+                    history={active.powerHistory}
+                  />
+                </div>
+
+                <div className="mt-5 space-y-5">
+                  <SensorRow
+                    channels={active.tempChannels}
+                    temps={active.temps}
+                    maxTemp={active.maxTemp}
+                    otpLimit={otpLimit}
+                    cycleAh={active.cycleAh}
+                    cycleCount={active.cycleCount}
+                  />
+
+                  <section className="rounded-3xl bg-[var(--card)] p-5 shadow-sm ring-1 ring-[var(--border)] md:p-6">
+                    <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <h2 className="text-base font-bold text-[var(--foreground)]">
+                          Cell Voltage Monitoring · {settings.cellCount}S
+                        </h2>
+                        {active.wireResistances?.some((r) => typeof r === "number" && r > 0) && (
+                          <p className="mt-0.5 flex items-center gap-1.5 text-xs text-[var(--muted-foreground)]">
+                            <Cable className="size-3.5" />
+                            "Wire" = wiring/busbar connection resistance per cell tap, not the cell's own internal resistance (IR)
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Pill tone="warning" icon={ArrowUpRight}>
+                          Max C{active.maxIdx + 1} · {active.maxV.toFixed(3)}V
+                        </Pill>
+                        <Pill tone="info" icon={ArrowDownRight}>
+                          Min C{active.minIdx + 1} · {active.minV.toFixed(3)}V
+                        </Pill>
+                        <Pill tone={vd.tone}>ΔV {active.voltDiffMv}mV</Pill>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-4 gap-2 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10">
+                      {active.cells.map((v, i) => {
+                        const isMax = i === active.maxIdx;
+                        const isMin = i === active.minIdx;
+                        const pct = cellFillPct(v);
+                        const isOverVoltage = v > settings.cellOvp;
+                        const isUnderVoltage = v < settings.cellUvp;
+                        const isBreach = isOverVoltage || isUnderVoltage;
+                        const tone = isBreach ? "critical" : isMax ? "warning" : isMin ? "info" : null;
+                        const t = tone ? statusTone(tone) : null;
+                        const fillColor = t ? t.stroke : "var(--brand)";
+                        const ohm = active.wireResistances?.[i];
+                        const hasWireValue = typeof ohm === "number" && ohm > 0;
+                        const badge = isBreach ? (isOverVoltage ? "OVP" : "UVP") : isMax ? "MAX" : isMin ? "MIN" : null;
+
+                        return (
+                          <div
+                            key={i}
+                            className={`relative rounded-xl p-2.5 text-center ring-1 transition-all duration-200 hover:-translate-y-1 hover:shadow-lg ${
+                              t ? `${t.bg} ring-[var(--border)]` : "bg-[var(--card)] ring-[var(--border)]"
+                            }`}
+                          >
+                            {badge && (
+                              <span
+                                className={`absolute -right-1.5 -top-1.5 rounded-full px-1.5 py-0.5 text-[8px] font-bold text-white shadow-md ${
+                                  isBreach ? "animate-pulse" : ""
+                                }`}
+                                style={{ backgroundColor: isBreach ? "var(--critical)" : isMax ? "var(--warning)" : "var(--info)" }}
+                              >
+                                {badge}
+                              </span>
+                            )}
+
+                            <div className={`text-[10px] font-bold ${t ? t.fg : "text-[var(--muted-foreground)]"}`}>
+                              C{i + 1}
+                            </div>
+
+                            <div className="text-sm font-extrabold text-[var(--foreground)] tabular-nums my-1">{v.toFixed(3)}</div>
+
+                            <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-[var(--border)]">
+                              <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: fillColor }} />
+                            </div>
+
+                            {hasWireValue && (
+                              <div className="mt-1.5 flex items-center justify-center gap-0.5 text-[9px] text-[var(--muted-foreground)]">
+                                <Cable className="size-2.5" />
+                                {Math.round(ohm * 1000)}mΩ
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
+
+                  <ChargeDischargeChart history={active.powerHistory} hubId={activeConfig.hubId} bmsKey={activeConfig.bmsKey} />
+                  <CommunicationPanel remoteSettings={active.remoteSettings} />
+                </div>
+
+                <p className="mt-6 text-center text-xs text-[var(--muted-foreground)]">
+                  Live telemetry from Firebase RTDB · viewing {active.name}
+                </p>
+              </>
+            )}
+
+            <Modal open={showLog} onClose={() => setShowLog(false)} title={`System Log · ${active.name}`}>
+              <DetailedLog entries={active.log} />
+            </Modal>
+
+            <Modal open={showAlarms} onClose={() => setShowAlarms(false)} title={`Alarms · ${active.name}`} maxWidthClass="max-w-md">
+              <AlarmList alarms={activeAlarms} />
+            </Modal>
+
+            <Modal open={showConfig} onClose={() => setShowConfig(false)} title={`Configuration · ${active.name}`} maxWidthClass="max-w-4xl">
+              <SettingsPanel
+                settings={settings}
+                onSaveSetting={saveSetting}
+                liveBatteryVoltage={active.isLive ? active.batteryVoltageRaw : undefined}
+                disabled={active.isLive && active.adminDisabled}
+                customName={settings.myCustomName}
+                onSaveDeviceName={(name) => saveSetting("myCustomName", name)}
+                batteryType={active.info?.battery_type}
+                saveError={saveError}
+                onDismissSaveError={() => setSaveError(null)}
+                onOpenLog={() => {
+                  setShowConfig(false);
+                  setShowLog(true);
+                }}
+                onChangeLocation={() => {
+                  setShowConfig(false);
+                  weatherLoc.setShowSetupModal(true);
+                }}
+              />
+            </Modal>
+
+            <InstallationLocationModal
+              open={weatherLoc.showSetupModal}
+              initialLocation={savedLocation}
+              onSave={weatherLoc.saveLocation}
+              onClose={() => weatherLoc.setShowSetupModal(false)}
+              saving={weatherLoc.saving}
+            />
+            <WeatherModal
+              open={showWeatherModal}
+              onClose={() => setShowWeatherModal(false)}
+              weather={weatherLoc.weather}
+              loading={weatherLoc.loading}
+              error={weatherLoc.error}
+              location={savedLocation}
+              onRetry={() => weatherLoc.loadWeather()}
+              onChangeLocation={() => {
+                setShowWeatherModal(false);
+                weatherLoc.setShowSetupModal(true);
+              }}
+            />
+
+            <Modal open={showOfflineModal} onClose={() => setOfflineDismissed(true)} title="อุปกรณ์หลุดการเชื่อมต่อ">
+              <div className="flex flex-col items-center gap-2 py-3 text-center">
+                <div className="relative mb-2 flex size-16 items-center justify-center">
+                  <span className="absolute inline-flex size-full animate-ping rounded-full bg-[var(--critical)]/30" />
+                  <span className="relative flex size-16 items-center justify-center rounded-full bg-[var(--critical-10)] ring-1 ring-[var(--critical)]/30">
+                    <WifiOff className="size-7 text-[var(--critical)]" />
+                  </span>
+                </div>
+
+                <p className="text-base font-bold text-[var(--foreground)]">{active.name} ไม่ตอบสนอง</p>
+                <p className="max-w-xs text-xs text-[var(--muted-foreground)]">
+                  สัญญาณจาก ESP32/BLE หายไป อาจจะไฟดับ, wifi หลุด, หรือแบตอยู่นอกระยะ - ข้อมูลที่เห็นตอนนี้เป็นค่าล่าสุดก่อนหลุด ไม่ใช่ real-time แล้วนะ
+                </p>
+
+                {active.lastUpdateAt && (
+                  <span className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-[var(--muted)] px-3.5 py-1 text-xs font-medium text-[var(--muted-foreground)]">
+                    <Clock className="size-3.5" />
+                    อัปเดตล่าสุด {new Date(active.lastUpdateAt).toLocaleTimeString()}
+                  </span>
+                )}
+
+                <div className="mt-5 flex w-full items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => window.location.reload()}
+                    className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl bg-[var(--brand)] py-3 text-xs font-semibold text-white shadow-md transition-transform hover:opacity-90 active:scale-95"
+                  >
+                    <RefreshCw className="size-4" />
+                    รีเฟรชเลย
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setOfflineDismissed(true)}
+                    className="inline-flex items-center justify-center rounded-2xl px-4 py-3 text-xs font-semibold text-[var(--muted-foreground)] ring-1 ring-[var(--border)] transition-colors hover:bg-[var(--muted)]"
+                  >
+                    รอเดี๋ยว
+                  </button>
+                </div>
+
+                <p className="mt-3 flex items-center gap-1 text-[11px] text-[var(--muted-foreground)]">
+                  <MessageCircleQuestion className="size-3.5" />
+                  ยังไม่กลับมา? ทัก Line: Poote3105
+                </p>
+              </div>
+            </Modal>
           </>
         )}
-
-      <Modal open={showLog} onClose={() => setShowLog(false)} title={`System Log · ${active.name}`}>
-        <DetailedLog entries={active.log} />
-      </Modal>
-
-      <Modal open={showAlarms} onClose={() => setShowAlarms(false)} title={`Alarms · ${active.name}`} maxWidthClass="max-w-md">
-        <AlarmList alarms={activeAlarms} />
-      </Modal>
-
-      <Modal open={showConfig} onClose={() => setShowConfig(false)} title={`Configuration · ${active.name}`} maxWidthClass="max-w-4xl">
-        <SettingsPanel
-          settings={settings}
-          onSaveSetting={saveSetting}
-          liveBatteryVoltage={active.isLive ? active.batteryVoltageRaw : undefined}
-          disabled={active.isLive && active.adminDisabled}
-          customName={settings.myCustomName}
-          onSaveDeviceName={(name) => saveSetting("myCustomName", name)}
-          batteryType={active.info?.battery_type}
-          saveError={saveError}
-          onDismissSaveError={() => setSaveError(null)}
-          onOpenLog={() => {
-            // Closes Config first - both use the same fixed inset-0 overlay
-            // z-index, so opening Log while Config is still open would just
-            // stack invisibly underneath it.
-            setShowConfig(false);
-            setShowLog(true);
-          }}
-          onChangeLocation={() => {
-            setShowConfig(false);
-            weatherLoc.setShowSetupModal(true);
-          }}
-        />
-      </Modal>
-
-      <InstallationLocationModal
-        open={weatherLoc.showSetupModal}
-        initialLocation={savedLocation}
-        onSave={weatherLoc.saveLocation}
-        onClose={() => weatherLoc.setShowSetupModal(false)}
-        saving={weatherLoc.saving}
-      />
-      <WeatherModal
-        open={showWeatherModal}
-        onClose={() => setShowWeatherModal(false)}
-        weather={weatherLoc.weather}
-        loading={weatherLoc.loading}
-        error={weatherLoc.error}
-        location={savedLocation}
-        onRetry={() => weatherLoc.loadWeather()}
-        onChangeLocation={() => {
-          // Same overlay z-index as InstallationLocationModal - close this
-          // one first so opening the setup modal from inside it doesn't
-          // just stack invisibly underneath (same reasoning as Config/Log).
-          setShowWeatherModal(false);
-          weatherLoc.setShowSetupModal(true);
-        }}
-      />
-
-      <Modal open={showOfflineModal} onClose={() => setOfflineDismissed(true)} title="อุปกรณ์หลุดการเชื่อมต่อ">
-        <div className="flex flex-col items-center gap-1 py-2 text-center">
-          <div className="relative mb-2 flex size-16 items-center justify-center">
-            <span className="absolute inline-flex size-full animate-ping rounded-full bg-[var(--critical)]/30" />
-            <span className="relative flex size-16 items-center justify-center rounded-full bg-[var(--critical-10)] ring-1 ring-[var(--critical)]/30">
-              <WifiOff className="size-7 text-[var(--critical)]" />
-            </span>
-          </div>
-
-          <p className="text-sm font-bold text-[var(--foreground)]">{active.name} ไม่ตอบสนอง</p>
-          <p className="max-w-xs text-xs text-[var(--muted-foreground)]">
-            สัญญาณจาก ESP32/BLE หายไป อาจจะไฟดับ, wifi หลุด, หรือแบตอยู่นอกระยะ - ข้อมูลที่เห็นตอนนี้เป็นค่าล่าสุดก่อนหลุด ไม่ใช่ real-time แล้วนะ
-          </p>
-
-          {active.lastUpdateAt && (
-            <span className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-[var(--muted)] px-3 py-1 text-[11px] font-medium text-[var(--muted-foreground)]">
-              <Clock className="size-3" />
-              อัปเดตล่าสุด {new Date(active.lastUpdateAt).toLocaleTimeString()}
-            </span>
-          )}
-
-          <div className="mt-5 flex w-full items-center gap-2">
-            <button
-              type="button"
-              onClick={() => window.location.reload()}
-              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[var(--brand)] py-2.5 text-xs font-semibold text-white shadow-sm transition-transform hover:opacity-90 active:scale-95"
-            >
-              <RefreshCw className="size-3.5" />
-              รีเฟรชเลย
-            </button>
-            <button
-              type="button"
-              onClick={() => setOfflineDismissed(true)}
-              className="inline-flex items-center justify-center rounded-xl px-3 py-2.5 text-xs font-semibold text-[var(--muted-foreground)] ring-1 ring-[var(--border)] transition-colors hover:bg-[var(--muted)]"
-            >
-              รอเดี๋ยว
-            </button>
-          </div>
-
-          <p className="mt-3 flex items-center gap-1 text-[10px] text-[var(--muted-foreground)]">
-            <MessageCircleQuestion className="size-3" />
-            ยังไม่กลับมา? ทัก Line: Poote3105
-          </p>
-        </div>
-      </Modal>
-        </>
-      )}
       </div>
-  );
+    );
+
+  
 }
+

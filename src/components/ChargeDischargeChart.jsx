@@ -102,7 +102,12 @@ function LegendDot({ color, label }) {
 function StatChip({ color, label, value }) {
   return (
     <div className="flex min-w-[7.5rem] flex-1 items-center gap-2 rounded-xl bg-[var(--muted)] px-3 py-2">
-      <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />
+      {/* Classic ping-badge pattern - a fading, growing ring behind a solid
+          dot, both the same color - reads as "this number is live/current". */}
+      <span className="relative flex size-2 shrink-0">
+        <span className="absolute inline-flex size-full animate-ping rounded-full opacity-60" style={{ backgroundColor: color }} />
+        <span className="relative inline-flex size-2 rounded-full" style={{ backgroundColor: color }} />
+      </span>
       <div className="min-w-0">
         <p className="text-[10px] font-medium text-[var(--muted-foreground)]">{label}</p>
         <p className="truncate text-xs font-bold tabular-nums text-[var(--foreground)]">{value}</p>
