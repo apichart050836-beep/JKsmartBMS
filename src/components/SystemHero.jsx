@@ -79,26 +79,28 @@ export function SystemHero({
   
     // 1. ดึง IP จาก info.esp_ip_address มาเตรียมไว้
     const initialIp = info?.esp_ip_address || "";
- 
+
     // 2. State สำหรับ Firmware Update Modal
-    const [isFwModalOpen, setIsFwModalOpen] = useState(false);
     const [deviceIp, setDeviceIp] = useState(initialIp); // <-- ประกาศแค่จุดนี้จุดเดียว
     const [otaPassword, setOtaPassword] = useState("");
     const [selectedFile, setSelectedFile] = useState(null);
-    
-    const [updateProgress, setUpdateProgress] = useState(0);
- 
-    const [statusMessage, setStatusMessage] = useState("");
- 
- 
-    // 3. ใช้ useEffect อัปเดตค่าเข้า State ทันทีเมื่อเปิด Modal หรือเมื่อ info ถูกโหลดมาสำเร็จ
-    useEffect(() => {
-        if (isFwModalOpen) {
-            setDeviceIp(info?.esp_ip_address || "");
-        }
-    }, [isFwModalOpen, info?.esp_ip_address]);
 
-   const [isModalOpen, setIsModalOpen] = useState(false);
+    const [updateProgress, setUpdateProgress] = useState(0);
+
+    const [statusMessage, setStatusMessage] = useState("");
+
+    const [isModalOpen, setIsModalOpen] = useState(false);
+
+    // 3. อัปเดต deviceIp ทุกครั้งที่ info.esp_ip_address เปลี่ยน (สลับ BMS tab
+    // ก็นับด้วย - ก่อนหน้านี้ผูก effect นี้ไว้กับ isFwModalOpen ที่เป็น state
+    // ค้างจากโค้ดเก่า ไม่มีใครสั่ง setIsFwModalOpen(true) อีกแล้วหลังเปลี่ยน
+    // มาใช้ isModalOpen เลย effect นี้เลยไม่เคยทำงาน ทำให้ deviceIp ค้างอยู่ที่
+    // ค่าตอน mount ครั้งแรกตลอด ไม่ว่าจะสลับไปดู BMS ตัวไหนก็ตาม - ยืนยันแล้ว
+    // จาก user report ที่ IP ไม่เปลี่ยนตอนสลับแท็บ
+    useEffect(() => {
+        setDeviceIp(info?.esp_ip_address || "");
+    }, [info?.esp_ip_address]);
+
     const targetIp = deviceIp;
 
 return (
