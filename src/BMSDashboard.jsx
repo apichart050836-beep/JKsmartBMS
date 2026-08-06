@@ -356,6 +356,8 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
   ];
   const fleetChargedAhToday = fleetDailyEnergies.reduce((sum, e) => sum + (e.chargedAh || 0), 0);
   const fleetChargedWhToday = fleetDailyEnergies.reduce((sum, e) => sum + (e.chargedWh || 0), 0);
+  const fleetDischargedAhToday = fleetDailyEnergies.reduce((sum, e) => sum + (e.dischargedAh || 0), 0);
+  const fleetDischargedWhToday = fleetDailyEnergies.reduce((sum, e) => sum + (e.dischargedWh || 0), 0);
   const activeAlarms = computeAlarms(active, settings);
   const activeDeviceMac = active.info?.jk_mac_address || activeConfig.deviceKey;
   const activeDeviceLabel = settings.myCustomName || activeDeviceMac;
@@ -740,15 +742,24 @@ const loadConsumptionPower = totalPower < 0 ? Math.abs(totalPower) : 0;
                     
                     <div className="bg-slate-900/70 border border-slate-800/80 p-3 rounded-2xl flex items-center justify-between shadow-sm backdrop-blur-sm">
                       <div>
-                        <div className="text-[11px] font-medium text-slate-400">Active Home Load</div>
+                        <div className="text-[11px] font-medium text-slate-400">Net Load Power</div>
+                        {/* No day/night gate anymore - computed continuously,
+                            per explicit request. Note this can only ever be
+                            the load NOT covered by solar (i.e. what the
+                            battery had to discharge to make up) - there is no
+                            real solar production sensor anywhere in this app
+                            (confirmed - solarGenPower elsewhere is inferred
+                            from charge power, not measured), so any load
+                            currently being served directly by solar is
+                            invisible to this reading by hardware limitation,
+                            not a bug. Same reasoning behind the Ah/kWh line
+                            below already using discharged energy, not a
+                            broader "total load" figure. */}
                         <div className="text-sm font-bold text-indigo-400 font-mono mt-0.5">
-                          {(() => {
-                            const now = new Date();
-                            const currentHour = now.getHours();
-                            const currentMinute = now.getMinutes();
-                            const isNight = (currentHour * 60 + currentMinute) >= 1080;
-                            return isNight ? Math.abs(totalAggregatedPower > 0 ? totalAggregatedPower : 0).toFixed(0) : "0";
-                          })()} W
+                          {(totalAggregatedPower < 0 ? Math.abs(totalAggregatedPower) : 0).toFixed(0)} W
+                        </div>
+                        <div className="text-[10px] text-slate-500 font-mono mt-0.5">
+                          {fleetDischargedAhToday.toFixed(1)} Ah · {(fleetDischargedWhToday / 1000).toFixed(2)} kWh
                         </div>
                       </div>
                       <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-base">💡</div>
