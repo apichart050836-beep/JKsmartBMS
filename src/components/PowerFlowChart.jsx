@@ -1,5 +1,5 @@
 import React from "react";
-import { Zap, ArrowDownRight, Activity, Thermometer } from "lucide-react";
+import { Zap, Gauge, Activity, Thermometer } from "lucide-react";
 import { statusTone } from "../lib/tone.js";
 
 // A sensor alarms as soon as it crosses the configured OTP; it flags amber a
@@ -17,14 +17,13 @@ function channelTone(value, otpLimit) {
  * คำนวณและแสดงผลการไหลของพลังงาน Realtime (Charge + / Discharge -)
  */
 export function PowerFlowChart({
-    packVoltage = 0,
     current = 0,
-    dischargedAh = 0,
-    dischargedWh = 0,
     socPercent = 0,
     remainingRuntime,
     timeToFullCharge,
+    recommendedChargeCurrentA,
     recommendedDischargeCurrentA,
+    configuredChargeCurrentA,
     configuredDischargeCurrentA,
     history = [],
     channels = [],
@@ -34,18 +33,9 @@ export function PowerFlowChart({
     cycleAh = 0,
     cycleCount = 0,
 }) {
-    // 1. คำนวณ Power Realtime (P = V * I)
-    const rawPowerW = packVoltage * current;
-    const absPowerW = Math.abs(rawPowerW);
-
-    // 2. กำหนดสถานะ Flow (Charge > 0.1A, Discharge < -0.1A, Idle)
+    // Flow state for the header badge (Charge > 0.1A, Discharge < -0.1A, Idle)
     const isCharging = current > 0.1;
     const isDischarging = current < -0.1;
-
-    // 3. Real energy today so far - dischargedWh comes from the server's
-    // actual V x I x t integration over telemetry_log (see
-    // useDailyEnergy.js / server/routes/history.js), not an Ah x
-    // current-instant-voltage approximation.
 
     return (
         <section className="rounded-2xl bg-[var(--card)] p-5 shadow-sm ring-1 ring-[var(--border)] md:p-6">
@@ -158,48 +148,50 @@ export function PowerFlowChart({
                     </div>
                 </div>
 
-                {/* Card 3: Discharge Outflow (-) */}
-                <div
-                    className={`relative overflow-hidden rounded-xl p-4 ring-1 transition-all ${isDischarging
-                            ? "bg-amber-500/5 ring-amber-500/30"
-                            : "bg-[var(--card)] ring-[var(--border)]"
-                        }`}
-                >
+                {/* Card 3: Current Limits - live Discharge Rate readout
+                    removed per explicit request, leaving just the
+                    recommended/configured limit lines for both directions
+                    (charge lines moved back in here from the old Card 1). */}
+                <div className="relative overflow-hidden rounded-xl bg-[var(--card)] p-4 ring-1 ring-[var(--border)]">
                     <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold text-[var(--muted-foreground)]">Discharge Rate (-)</span>
-                        <ArrowDownRight className={`size-4 ${isDischarging ? "text-amber-500" : "text-gray-400"}`} />
+                        <span className="text-xs font-semibold text-[var(--muted-foreground)]">Current Limits</span>
+                        <Gauge className="size-4 text-[var(--muted-foreground)]" />
                     </div>
-                    <div className="mt-2 flex items-baseline gap-1">
-                        <span className="text-2xl font-bold text-[var(--foreground)] tabular-nums">
-                            {isDischarging ? current.toFixed(1) : "0.0"}
-                        </span>
-                        <span className="text-xs text-[var(--muted-foreground)]">A</span>
-                        <span className="ml-auto text-xs font-semibold text-amber-500 tabular-nums">
-                            {isDischarging ? `-${absPowerW.toFixed(0)} W` : "0 W"}
-                        </span>
+                    <div className="mt-3 space-y-1.5">
+                        {typeof recommendedDischargeCurrentA === "number" && (
+                            <div className="flex justify-between text-[11px] text-[var(--muted-foreground)]">
+                                <span>แนะนำดิสชาร์จไม่เกิน (0.5C)</span>
+                                <span className="font-semibold text-[var(--foreground)] tabular-nums">
+                                    {recommendedDischargeCurrentA.toFixed(1)} A
+                                </span>
+                            </div>
+                        )}
+                        {typeof configuredDischargeCurrentA === "number" && (
+                            <div className="flex justify-between text-[11px] text-[var(--muted-foreground)]">
+                                <span>ค่าดิสชาร์จที่ตั้งไว้</span>
+                                <span className="font-semibold text-[var(--foreground)] tabular-nums">
+                                    {configuredDischargeCurrentA.toFixed(1)} A
+                                </span>
+                            </div>
+                        )}
+                        <div className="border-t border-[var(--border)]/60 pt-1.5" />
+                        {typeof recommendedChargeCurrentA === "number" && (
+                            <div className="flex justify-between text-[11px] text-[var(--muted-foreground)]">
+                                <span>แนะนำชาร์จไม่เกิน (0.25C)</span>
+                                <span className="font-semibold text-[var(--foreground)] tabular-nums">
+                                    {recommendedChargeCurrentA.toFixed(1)} A
+                                </span>
+                            </div>
+                        )}
+                        {typeof configuredChargeCurrentA === "number" && (
+                            <div className="flex justify-between text-[11px] text-[var(--muted-foreground)]">
+                                <span>ค่าชาร์จที่ตั้งไว้</span>
+                                <span className="font-semibold text-[var(--foreground)] tabular-nums">
+                                    {configuredChargeCurrentA.toFixed(1)} A
+                                </span>
+                            </div>
+                        )}
                     </div>
-                    <div className="mt-3 flex justify-between border-t border-[var(--border)]/60 pt-2 text-[11px] text-[var(--muted-foreground)]">
-                        <span>Daily Discharged:</span>
-                        <span className="font-semibold text-[var(--foreground)] tabular-nums">
-                            {dischargedAh.toFixed(1)} Ah ({(dischargedWh / 1000).toFixed(2)} kWh)
-                        </span>
-                    </div>
-                    {typeof recommendedDischargeCurrentA === "number" && (
-                        <div className="mt-1.5 flex justify-between text-[11px] text-[var(--muted-foreground)]">
-                            <span>แนะนำไม่เกิน (0.5C)</span>
-                            <span className="font-semibold text-[var(--foreground)] tabular-nums">
-                                {recommendedDischargeCurrentA.toFixed(1)} A
-                            </span>
-                        </div>
-                    )}
-                    {typeof configuredDischargeCurrentA === "number" && (
-                        <div className="mt-1.5 flex justify-between text-[11px] text-[var(--muted-foreground)]">
-                            <span>ค่าดิสชาร์จที่ตั้งไว้</span>
-                            <span className="font-semibold text-[var(--foreground)] tabular-nums">
-                                {configuredDischargeCurrentA.toFixed(1)} A
-                            </span>
-                        </div>
-                    )}
                 </div>
             </div>
         </section>

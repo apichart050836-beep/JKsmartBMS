@@ -11,6 +11,7 @@ import {
   CartesianGrid,
   Tooltip,
   ReferenceLine,
+  ReferenceDot,
 } from "recharts";
 import { api } from "../lib/apiClient.js";
 
@@ -72,6 +73,22 @@ function toMonthStr(d) {
 // from the visible tick labels below - stepping by minutes (not fractional
 // hours) avoids float-drift landing a tick a hair off a clean value.
 const FIVE_MIN_GRID_TICKS = Array.from({ length: 24 * 60 / 5 + 1 }, (_, i) => (i * 5) / 60);
+
+// Eye-catching pulsing marker for the peak charge/discharge point -
+// transformOrigin is set explicitly to the dot's own pixel position
+// (cx/cy, already in SVG user-space from recharts) since SVG elements
+// otherwise scale from the viewport origin by default, not their own
+// center, which would make the ping ring drift instead of growing evenly
+// outward from the dot.
+function PulseDot({ cx, cy, color }) {
+  if (typeof cx !== "number" || typeof cy !== "number") return null;
+  return (
+    <g>
+      <circle cx={cx} cy={cy} r={5} fill={color} opacity={0.5} className="animate-ping" style={{ transformOrigin: `${cx}px ${cy}px` }} />
+      <circle cx={cx} cy={cy} r={3.5} fill={color} stroke="var(--card)" strokeWidth={1.5} />
+    </g>
+  );
+}
 
 function LegendDot({ color, label }) {
   return (
@@ -520,6 +537,25 @@ export function ChargeDischargeChart({ history = [], hubId, bmsKey }) {
                 activeDot={{ r: 4, strokeWidth: 2, stroke: "var(--card)" }}
                 isAnimationActive={!isAreaMock}
               />
+              {/* Pulsing markers at the peak charge/discharge moments, as
+                  visual anchors for the matching stat chips above - never on
+                  mock data, same rule the chips themselves follow. */}
+              {!isAreaMock && dailyPeaks?.peakCharge && (
+                <ReferenceDot
+                  x={dailyPeaks.peakCharge.hour}
+                  y={dailyPeaks.peakCharge.current}
+                  shape={(props) => <PulseDot {...props} color={CHARGE_COLOR} />}
+                  isFront
+                />
+              )}
+              {!isAreaMock && dailyPeaks?.peakDischarge && (
+                <ReferenceDot
+                  x={dailyPeaks.peakDischarge.hour}
+                  y={Math.abs(dailyPeaks.peakDischarge.current)}
+                  shape={(props) => <PulseDot {...props} color={DISCHARGE_COLOR} />}
+                  isFront
+                />
+              )}
             </AreaChart>
           ) : (
             <BarChart data={barData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }} barGap={2}>
