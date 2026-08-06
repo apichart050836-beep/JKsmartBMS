@@ -194,12 +194,6 @@ export function PowerFlowChart({
                     </div>
                 </div>
             </div>
-
-            {/* Illustrative system diagram, per explicit request. */}
-            <div className="mt-5 rounded-xl bg-[var(--card)] p-3 ring-1 ring-[var(--border)]">
-                <p className="mb-2 text-xs font-semibold text-[var(--muted-foreground)]">Solar Hybrid Energy Flow</p>
-                <img src="/images/flow-main.jpg" alt="Solar Hybrid Energy Flow diagram" className="w-full rounded-lg" />
-            </div>
         </section>
     );
 }
