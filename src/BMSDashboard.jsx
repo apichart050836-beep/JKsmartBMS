@@ -9,7 +9,6 @@ import { InstallationLocationModal } from "./components/InstallationLocationModa
 import { WeatherModal } from "./components/WeatherModal.jsx";
 import { DetailedLog } from "./components/DetailedLog.jsx";
 import { SystemHero } from "./components/SystemHero.jsx";
-import { CommunicationPanel } from "./components/CommunicationPanel.jsx";
 import { PowerFlowChart } from "./components/PowerFlowChart.jsx";
 import { ChargeDischargeChart } from "./components/ChargeDischargeChart.jsx";
 import { SettingsPanel } from "./components/SettingsPanel.jsx";
@@ -759,7 +758,7 @@ const loadConsumptionPower = totalPower < 0 ? Math.abs(totalPower) : 0;
                           </div>
 
                           {/* 3. Critical Loads Panel */}
-                          <div className="absolute top-[50%] right-[32%] -translate-y-1/2 bg-slate-900/90 backdrop-blur-xl border border-indigo-500/30 px-2.5 py-1 sm:px-3.5 sm:py-1.5 rounded-lg sm:rounded-xl text-center z-20 shadow-xl shadow-indigo-950/20">
+                          <div className="absolute top-[50%] right-[36%] -translate-y-1/2 bg-slate-900/90 backdrop-blur-xl border border-indigo-500/30 px-2.5 py-1 sm:px-3.5 sm:py-1.5 rounded-lg sm:rounded-xl text-center z-20 shadow-xl shadow-indigo-950/20">
                             <div className="text-[8px] sm:text-[9px] uppercase tracking-widest font-bold text-indigo-400">Loads</div>
                             <div className="text-xs sm:text-sm font-extrabold text-white font-mono">{loadConsumptionPower.toFixed(1)} W</div>
                           </div>
@@ -804,7 +803,7 @@ const loadConsumptionPower = totalPower < 0 ? Math.abs(totalPower) : 0;
                       <div>
                         <div className="text-[11px] font-medium text-slate-400">Net Battery Power</div>
                         <div className="text-sm font-bold text-teal-400 font-mono mt-0.5">{totalAggregatedPower.toFixed(0)} W</div>
-                        <div className="text-[10px] text-slate-500 font-mono mt-0.5">
+                        <div className="text-[10px] text-white font-mono mt-0.5">
                           {fleetChargedAhToday.toFixed(1)} Ah · {(fleetChargedWhToday / 1000).toFixed(2)} kWh
                         </div>
                         {peakToday.peakCharge && (
@@ -835,7 +834,7 @@ const loadConsumptionPower = totalPower < 0 ? Math.abs(totalPower) : 0;
                         <div className="text-sm font-bold text-indigo-400 font-mono mt-0.5">
                           {(totalAggregatedPower < 0 ? Math.abs(totalAggregatedPower) : 0).toFixed(0)} W
                         </div>
-                        <div className="text-[10px] text-slate-500 font-mono mt-0.5">
+                        <div className="text-[10px] text-white font-mono mt-0.5">
                           {fleetDischargedAhToday.toFixed(1)} Ah · {(fleetDischargedWhToday / 1000).toFixed(2)} kWh
                         </div>
                         {peakToday.peakDischarge && (
@@ -1017,12 +1016,7 @@ const loadConsumptionPower = totalPower < 0 ? Math.abs(totalPower) : 0;
                   </section>
 
                   <ChargeDischargeChart history={active.powerHistory} hubId={activeConfig.hubId} bmsKey={activeConfig.bmsKey} />
-                  <CommunicationPanel remoteSettings={active.remoteSettings} />
                 </div>
-
-                <p className="mt-6 text-center text-xs text-[var(--muted-foreground)]">
-                  Live telemetry from Firebase RTDB · viewing {active.name}
-                </p>
               </>
             )}
 
