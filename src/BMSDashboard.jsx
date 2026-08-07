@@ -25,6 +25,7 @@ import { AnnouncementBanner } from "./components/AnnouncementBanner.jsx";
 import { FirmwareUpdateToast } from "./components/FirmwareUpdateToast.jsx";
 import { VersionCheckModal } from "./components/VersionCheckModal.jsx";
 import { useDailyEnergy } from "./hooks/useDailyEnergy.js";
+import { usePeakToday } from "./hooks/usePeakToday.js";
  
 
 const MAX_BMS_SLOTS = 10;
@@ -334,6 +335,12 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
 
   const dailyEnergy = useDailyEnergy(activeConfig.hubId, activeConfig.bmsKey);
   const activeEnergy = { chargedAh: dailyEnergy.chargedAh, dischargedAh: dailyEnergy.dischargedAh };
+
+  // Fleet-wide (every device under this hub) peak charge/discharge power
+  // today, with when it happened - for the Net Battery/Load Power cards,
+  // per explicit request. hubId alone (no bmsKey) since this is a hub-wide
+  // sum, same scope as totalAggregatedPower below.
+  const peakToday = usePeakToday(activeConfig.hubId);
 
   // Same unrolled-per-slot pattern as bms0..bms9 above (hooks can't be
   // called in a loop) - fleet-wide today's charged Ah/Wh across every real
@@ -800,6 +807,12 @@ const loadConsumptionPower = totalPower < 0 ? Math.abs(totalPower) : 0;
                         <div className="text-[10px] text-slate-500 font-mono mt-0.5">
                           {fleetChargedAhToday.toFixed(1)} Ah · {(fleetChargedWhToday / 1000).toFixed(2)} kWh
                         </div>
+                        {peakToday.peakCharge && (
+                          <div className="text-[10px] text-teal-300/80 font-mono mt-0.5">
+                            ชาร์จสูงสุด {peakToday.peakCharge.power.toFixed(0)} W ·{" "}
+                            {new Date(peakToday.peakCharge.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          </div>
+                        )}
                       </div>
                       <div className="p-2 rounded-xl bg-teal-500/10 text-teal-400 border border-teal-500/20 text-base">🔋</div>
                     </div>
@@ -825,6 +838,12 @@ const loadConsumptionPower = totalPower < 0 ? Math.abs(totalPower) : 0;
                         <div className="text-[10px] text-slate-500 font-mono mt-0.5">
                           {fleetDischargedAhToday.toFixed(1)} Ah · {(fleetDischargedWhToday / 1000).toFixed(2)} kWh
                         </div>
+                        {peakToday.peakDischarge && (
+                          <div className="text-[10px] text-indigo-300/80 font-mono mt-0.5">
+                            ดิสชาร์จสูงสุด {Math.abs(peakToday.peakDischarge.power).toFixed(0)} W ·{" "}
+                            {new Date(peakToday.peakDischarge.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          </div>
+                        )}
                       </div>
                       <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-base">💡</div>
                     </div>

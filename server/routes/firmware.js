@@ -7,8 +7,7 @@ import { requireAuth } from "../middleware/requireAuth.js";
 import { requireRole } from "../middleware/requireRole.js";
 import { db } from "../db.js";
 import { commitFirmwareFile, getRawFirmwareUrl, isGitStorageConfigured } from "../gitStorage.js";
-import { isFirebaseConfigured } from "../firebaseAdmin.js";
-import { writePath } from "../firebaseRead.js";
+import { isMqttConfigured, publishOtaCommand } from "../mqttClient.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIRMWARE_DIR = path.resolve(__dirname, "..", "firmware");
@@ -26,10 +25,6 @@ function toReleaseJson(row) {
 // '$', '[', ']', or '/'.
 function isSafeKey(k) {
   return typeof k === "string" && k.length > 0 && !/[./#$\[\]]/.test(k);
-}
-
-function devicePath(hubId, bmsKey) {
-  return bmsKey ? `JK_BMS_HUB/${hubId}/${bmsKey}` : `JK_BMS_HUB/${hubId}`;
 }
 
 // Parses+validates the `targets` query param (JSON array of {hubId, bmsKey}
@@ -60,15 +55,18 @@ function parseTargets(raw) {
  * pattern for a dashboard that loads shortly after).
  *
  * This server still never talks to a physical ESP32 directly - there's no
- * OTA transport *in this app*. What it DOES do now: for every device the
- * admin explicitly checks (`targets`), it writes {latest_version, url,
- * release_notes, update_flag: true} to that device's own Firebase firmware
- * node. That write is a real, meaningful signal - it's the exact path each
- * device's own ota_updater ESPHome component (esphome_components/
- * ota_updater/, wired into jkbms-bridge.yaml) polls on its own schedule and
- * self-flashes from when it sees update_flag=true. No target selected =
- * published to GitHub/the web notification only, same as before this
- * feature existed.
+ * OTA file transport *in this app*, only a signal. That signal moved from a
+ * Firebase write to an MQTT publish (per explicit request, 2026-08-06): for
+ * every device the admin explicitly checks (`targets`), it PUBLISHes
+ * {latest_version, url, update_flag: true, uploaded_at} to that exact
+ * device's own `jk_bms_hub/{hubId}/{bmsKey}/command` topic on the MQTT
+ * broker (see mqttClient.js) - the ESP32's own firmware subscribes there and
+ * self-flashes the instant it arrives, no polling involved. No target
+ * selected = published to GitHub/the web notification only, same as before.
+ * Also upserted into firmware_targets (server/db/schema.sql) so a later
+ * re-trigger (PATCH /:hubId/firmware/trigger-update) has something to
+ * re-publish - MQTT itself has no "current value" a reconnecting device
+ * could poll, unlike the Firebase node this replaced.
  *
  * Every upload is still saved to the firmware_releases table (metadata +
  * BLOB) unconditionally - that alone is what the notification/"latest"
@@ -77,7 +75,7 @@ function parseTargets(raw) {
  * top: it's what makes the file survive a Render redeploy without a paid
  * persistent disk (see gitStorage.js), but its failure is reported back to
  * the admin rather than made a hard blocker on publishing - and skips the
- * Firebase writes entirely, since there'd be no real URL to give a device.
+ * MQTT publish entirely, since there'd be no real URL to give a device.
  */
 export function createFirmwareRouter(io) {
   const router = Router();
@@ -118,27 +116,47 @@ export function createFirmwareRouter(io) {
         gitError = err.message;
       }
 
-      // Real per-device OTA signal (polled by each device's own ESP32
-      // ota_updater component - see jkbms-bridge.yaml) - separate from the
-      // firmware_releases row above, which only powers the web dashboard's
-      // notification badge. Best-effort per target: one device's write
-      // failing (bad hubId, Firebase hiccup) doesn't roll back the others or
-      // the publish itself, since the file's already safely on GitHub.
-      const firebaseResults = [];
-      if (rawUrl && isFirebaseConfigured && targets.length > 0) {
+      // Real per-device OTA signal - published straight to this device's own
+      // MQTT topic (its firmware subscribes there and self-flashes on
+      // arrival, no polling) - separate from the firmware_releases row
+      // above, which only powers the web dashboard's notification badge.
+      // Best-effort per target: one device's publish failing (bad hubId,
+      // broker hiccup) doesn't roll back the others or the publish itself,
+      // since the file's already safely on GitHub. Also upserted into
+      // firmware_targets so trigger-update has this to re-send later.
+      const mqttResults = [];
+      if (rawUrl && isMqttConfigured && targets.length > 0) {
+        const upsertTarget = db.prepare(
+          `INSERT INTO firmware_targets (hub_id, bms_key, latest_version, url, release_notes, uploaded_at)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT (hub_id, bms_key) DO UPDATE SET
+             latest_version = excluded.latest_version,
+             url = excluded.url,
+             release_notes = excluded.release_notes,
+             uploaded_at = excluded.uploaded_at`
+        );
         for (const target of targets) {
+          const bmsKeyNorm = target.bmsKey ?? "";
+          // The MAC segment in the MQTT topic - bmsKey is already this exact
+          // ESP32's own chip id (its Firebase path segment before this
+          // change), which is what's actually subscribed to MQTT. Flat-
+          // shaped hubs (bmsKey null - a single un-nested device) have no
+          // separate device MAC available here, so fall back to hubId; this
+          // hasn't been needed by any real device seen so far, only nested
+          // hubs have.
+          const mac = bmsKeyNorm || target.hubId;
           try {
-            await writePath(`${devicePath(target.hubId, target.bmsKey)}/firmware`, {
+            await publishOtaCommand(target.hubId, mac, {
               latest_version: version,
-              url: rawUrl,
-              release_notes: releaseNotes || null,
-              uploaded_at: uploadedAt,
               update_flag: true,
+              uploaded_at: uploadedAt,
+              url: rawUrl,
             });
-            firebaseResults.push({ ...target, ok: true });
+            upsertTarget.run(target.hubId, bmsKeyNorm, version, rawUrl, releaseNotes || null, uploadedAt);
+            mqttResults.push({ ...target, ok: true });
           } catch (err) {
-            console.error(`Firmware Firebase write failed for ${target.hubId}/${target.bmsKey ?? ""}: ${err.message}`);
-            firebaseResults.push({ ...target, ok: false, error: err.message });
+            console.error(`Firmware MQTT publish failed for ${target.hubId}/${bmsKeyNorm}: ${err.message}`);
+            mqttResults.push({ ...target, ok: false, error: err.message });
           }
         }
       }
@@ -151,7 +169,7 @@ export function createFirmwareRouter(io) {
         uploaded_at: uploadedAt,
       });
       io.to("role:user").emit("firmware:release", release);
-      res.json({ ok: true, release, gitError, rawUrl, firebaseResults });
+      res.json({ ok: true, release, gitError, rawUrl, mqttResults });
     }
   );
 

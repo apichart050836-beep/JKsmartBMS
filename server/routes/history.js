@@ -122,6 +122,45 @@ router.get("/:hubId/history/daily", requireAuth, (req, res) => {
   });
 });
 
+// Fleet-wide (every bms_key under this hub, not just one device) peak
+// charge/discharge power today, for the Solar Hybrid Energy Flow panel's
+// "Net Battery Power"/"Net Load Power" cards - per explicit request. Sums
+// power across devices AT EACH SHARED SNAPSHOT TIMESTAMP (telemetryLogger.js
+// writes one `ts = Date.now()` per snapshot cycle and reuses it for every
+// device logged in that cycle, so a plain GROUP BY ts here is a real,
+// synchronized fleet total - not an approximation stitched together from
+// independently-timed per-device peaks).
+router.get("/:hubId/history/peak-today", requireAuth, (req, res) => {
+  const { hubId } = req.params;
+  if (!isSafeKey(hubId) || !canAccessHub(req.user, hubId)) return res.status(403).json({ error: "Forbidden" });
+
+  const now = new Date(Date.now() + BANGKOK_OFFSET_MS);
+  const dayStart = bangkokMs(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const dayEnd = dayStart + 24 * 60 * 60 * 1000;
+
+  const rows = db
+    .prepare(
+      `SELECT ts, SUM(COALESCE(pack_voltage, 0) * COALESCE(charge_current, 0)) AS total_power
+       FROM telemetry_log
+       WHERE hub_id = ? AND ts >= ? AND ts < ?
+       GROUP BY ts
+       ORDER BY ts ASC`
+    )
+    .all(hubId, dayStart, dayEnd);
+
+  let peakCharge = null;
+  let peakDischarge = null;
+  for (const r of rows) {
+    if (r.total_power > 0 && (!peakCharge || r.total_power > peakCharge.power)) {
+      peakCharge = { power: r.total_power, ts: r.ts };
+    }
+    if (r.total_power < 0 && (!peakDischarge || r.total_power < peakDischarge.power)) {
+      peakDischarge = { power: r.total_power, ts: r.ts };
+    }
+  }
+  res.json({ peakCharge, peakDischarge });
+});
+
 router.get("/:hubId/history/monthly", requireAuth, (req, res) => {
   const { hubId } = req.params;
   const bmsKey = req.query.bmsKey ?? "";

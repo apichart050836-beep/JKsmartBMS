@@ -57,6 +57,10 @@ export const api = {
     request(`/api/hubs/${encodeURIComponent(hubId)}/history/monthly?month=${month}&bmsKey=${encodeURIComponent(bmsKey ?? "")}`),
   historyYearly: (hubId, bmsKey, year) =>
     request(`/api/hubs/${encodeURIComponent(hubId)}/history/yearly?year=${year}&bmsKey=${encodeURIComponent(bmsKey ?? "")}`),
+  // Fleet-wide (every device under this hub) peak charge/discharge power
+  // today - for the Solar Hybrid Energy Flow panel's Net Battery/Load Power
+  // cards. No bmsKey param - this is a hub-wide sum, not a per-device read.
+  historyPeakToday: (hubId) => request(`/api/hubs/${encodeURIComponent(hubId)}/history/peak-today`),
   sendAnnouncement: (message, category) =>
     request("/api/announcements", { method: "POST", body: JSON.stringify({ message, category }) }),
   latestAnnouncement: () => request("/api/announcements/latest"),

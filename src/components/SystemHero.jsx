@@ -1,5 +1,4 @@
 import React, { useState, useEffect} from "react";
-import axios from 'axios';
 import {
     Zap,
     Activity,
@@ -7,13 +6,6 @@ import {
     RefreshCw,
     Power,
     BellRing,
-    Cpu,
-    X,
-    Upload,
-    CheckCircle2,
-    AlertTriangle,
-    Server,
-    KeyRound,
     BatteryCharging, PlugZap ,Lightbulb
 } from "lucide-react";
 import { statusTone } from "../lib/tone.js";
@@ -76,32 +68,6 @@ export function SystemHero({
     firmwareVersion = info?.esp_firmware_version ? `v${info.esp_firmware_version}` : "v1.2.4.3",
 }) {
     const isCharging = status === "Charging";
-  
-    // 1. ดึง IP จาก info.esp_ip_address มาเตรียมไว้
-    const initialIp = info?.esp_ip_address || "";
-
-    // 2. State สำหรับ Firmware Update Modal
-    const [deviceIp, setDeviceIp] = useState(initialIp); // <-- ประกาศแค่จุดนี้จุดเดียว
-    const [otaPassword, setOtaPassword] = useState("");
-    const [selectedFile, setSelectedFile] = useState(null);
-
-    const [updateProgress, setUpdateProgress] = useState(0);
-
-    const [statusMessage, setStatusMessage] = useState("");
-
-    const [isModalOpen, setIsModalOpen] = useState(false);
-
-    // 3. อัปเดต deviceIp ทุกครั้งที่ info.esp_ip_address เปลี่ยน (สลับ BMS tab
-    // ก็นับด้วย - ก่อนหน้านี้ผูก effect นี้ไว้กับ isFwModalOpen ที่เป็น state
-    // ค้างจากโค้ดเก่า ไม่มีใครสั่ง setIsFwModalOpen(true) อีกแล้วหลังเปลี่ยน
-    // มาใช้ isModalOpen เลย effect นี้เลยไม่เคยทำงาน ทำให้ deviceIp ค้างอยู่ที่
-    // ค่าตอน mount ครั้งแรกตลอด ไม่ว่าจะสลับไปดู BMS ตัวไหนก็ตาม - ยืนยันแล้ว
-    // จาก user report ที่ IP ไม่เปลี่ยนตอนสลับแท็บ
-    useEffect(() => {
-        setDeviceIp(info?.esp_ip_address || "");
-    }, [info?.esp_ip_address]);
-
-    const targetIp = deviceIp;
 
 return (
         <div className="rounded-3xl bg-[var(--card)] p-5 shadow-sm ring-1 ring-[var(--border)] md:p-6">
@@ -139,13 +105,6 @@ return (
                             )}
                         </button>
                     )}
-
-                    {/* เรียกใช้งาน Modal และส่ง Props ที่จำเป็นเข้าไป */}
-                    <OTAUpdateModal 
-                        isOpen={isModalOpen} 
-                        onClose={() => setIsModalOpen(false)} 
-                        deviceIp={targetIp} 
-                    />
                 </div>
 
                 {/* Status Switches Indicators (ย้ายมาฝั่งขวาของแถวบนเพื่อให้บาลานซ์) */}
@@ -170,7 +129,8 @@ return (
                 </div>
             </div>
 
-            {/* Header Info: ชื่ออุปกรณ์ สถานะ Online/Offline และปุ่มอัปเดต OTA อยู่ขวาสุด */}
+            {/* Header Info: ชื่ออุปกรณ์ และสถานะ Online/Offline - ปุ่มอัปเดต
+                OTA ที่เคยอยู่ตรงนี้ถูกเอาออกแล้ว per explicit request. */}
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
                 <div>
                     <div className="flex items-center gap-2">
@@ -190,16 +150,6 @@ return (
                         {batteryType} · {cellCount}S · Max Balancer {maxBalancerCurrentA}A · <span className="font-semibold text-[var(--foreground)]">FW {firmwareVersion}</span>
                     </p>
                 </div>
-
-                {/* ปุ่มสำหรับคลิกเปิด Modal อัปเดตเฟิร์มแวร์ (ย้ายมาอยู่แถวเดียวกับ Online/Offline และชิดขวาสุด) */}
-                <button
-                    type="button"
-                    onClick={() => setIsModalOpen(true)}
-                    className="inline-flex items-center gap-2 rounded-xl bg-[var(--brand)] px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:opacity-90 transition-all active:scale-95"
-                >
-                    <Cpu className="size-4" />
-                    <span>อัปเดต OTA</span>
-                </button>
             </div>
 
             {/* Main Grid Section */}
@@ -585,182 +535,4 @@ return (
             </div>
         </div>
     );
-}
-
-export default function OTAUpdateModal({ isOpen, onClose, deviceIp = "192.168.1.50" }) {
-  const [status, setStatus] = useState("");
-  const [isUpdating, setIsUpdating] = useState(false);
-  const [flashStage, setFlashStage] = useState("idle"); // 'idle' | 'flashing' | 'success' | 'error'
-
-  if (!isOpen) return null;
-
-    const handleTriggerButton = async (e) => {
-        e.preventDefault();
-        if (!deviceIp) return alert("ไม่พบ IP Address ของอุปกรณ์");
-
-        setIsUpdating(true);
-        setFlashStage("flashing");
-        setStatus("กำลังส่งคำสั่งกดปุ่ม Trigger OTA ไปยังบอร์ด ESPHome...");
-
-        try {
-            // เปลี่ยนจาก axios.post เป็น axios.get (หรือลองสลับดูกรณีที่ POST แล้วเงียบ)
-            const response = await axios.get(`http://${deviceIp}/button/btn_trigger_Ota_pdate/press`, {
-                timeout: 5000,
-            });
-            
-            console.log("Command sent successfully", response.data);
-            setFlashStage("success");
-            setStatus("สั่งกดปุ่มอัปเดตสำเร็จ!");
-
-        } catch (error) {
-        console.error("Failed to trigger action:", error);
-        
-        // เพิ่มการเช็ค error.code === 'ECONNABORTED' และคำว่า 'timeout' ให้ชัดเจน
-        if (
-            error.code === 'ECONNABORTED' || 
-            error.code === 'ERR_NETWORK' || 
-            (error.message && error.message.includes('timeout')) ||
-            (error.message && error.message.includes('Network Error'))
-        ) {
-            console.warn("บอร์ดรับคำสั่งและน่าจะเริ่มกระบวนการแล้ว");
-            setFlashStage("success");
-            setStatus("สั่งกดปุ่มอัปเดตสำเร็จ! บอร์ดกำลังดำเนินการ");
-        } else {
-            setFlashStage("error");
-            setStatus(`สั่งงานไม่สำเร็จ: ${error.message}`);
-        }
-        } finally {
-            setIsUpdating(false);
-            }
-    };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs">
-      <div className="w-full max-w-lg rounded-2xl bg-[var(--card)] p-5 shadow-xl ring-1 ring-[var(--border)] animate-in fade-in zoom-in-95 duration-200">
-        
-        {/* Modal Header */}
-        <div className="flex items-center justify-between border-b border-[var(--border)] pb-3">
-          <div className="flex items-center gap-2">
-            <div className="flex size-8 items-center justify-center rounded-xl bg-[var(--brand-10)] text-[var(--brand)]">
-              <Upload className="size-4" />
-            </div>
-            <div>
-              <h3 className="text-sm font-bold text-[var(--foreground)]">อัปเดตเฟิร์มแวร์ผ่าน GitHub (OTA)</h3>
-              <p className="text-[11px] text-[var(--muted-foreground)]">สั่งกดปุ่ม `btn_trigger_Ota_pdate` เพื่อให้บอร์ดดึงไฟล์ .bin ล่าสุด</p>
-            </div>
-          </div>
-          <button
-            type="button"
-            disabled={isUpdating}
-            onClick={onClose}
-            className="rounded-lg p-1.5 text-[var(--muted-foreground)] hover:bg-[var(--muted)] transition-colors disabled:opacity-50"
-          >
-            <X className="size-4" />
-          </button>
-        </div>
-
-        {/* Modal Form Content */}
-        <form onSubmit={handleTriggerButton} className="mt-4 space-y-3.5">
-          {/* Target IP Display */}
-          <div>
-            <label className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-[var(--foreground)]">
-              <Server className="size-3.5 text-[var(--muted-foreground)]" />
-              Target Device IP:
-            </label>
-            <div className="w-full rounded-xl bg-[var(--muted)]/50 px-3 py-2 text-xs font-mono font-semibold text-[var(--foreground)] ring-1 ring-[var(--border)]">
-              {deviceIp}
-            </div>
-          </div>
-
-          {/* Warning Alert */}
-          <div className="flex items-start gap-2 rounded-xl bg-amber-500/15 p-2.5 text-amber-500 text-xs">
-            <AlertTriangle className="size-4 shrink-0 mt-0.5" />
-            <span>ระบบจะส่งคำสั่งไปกดปุ่มบนบอร์ดทันที บอร์ดจะทำการดาวน์โหลดไฟล์จาก GitHub และอัปเดตตัวเองโดยอัตโนมัติ</span>
-          </div>
-
-          {/* Status Box */}
-          {(isUpdating || flashStage !== "idle") && (
-            <div className="space-y-2 rounded-2xl bg-[var(--muted)]/30 p-3 ring-1 ring-[var(--border)]">
-              <div className="flex items-center justify-between text-xs font-semibold">
-                <span
-                  className={
-                    flashStage === "flashing"
-                      ? "text-amber-500"
-                      : flashStage === "success"
-                      ? "text-emerald-500"
-                      : flashStage === "error"
-                      ? "text-rose-500"
-                      : "text-sky-500"
-                  }
-                >
-                  {flashStage === "flashing" ? "⚡ กำลังส่งคำสั่ง..." : "สถานะการทำงาน"}
-                </span>
-                <span className="font-mono text-[11px] text-[var(--muted-foreground)]">
-                  Target: {deviceIp}
-                </span>
-              </div>
-
-              {/* Progress Bar Animation */}
-              <div className="h-2 w-full overflow-hidden rounded-full bg-[var(--border)]">
-                <div
-                  className={`h-full transition-all duration-300 ${
-                    flashStage === "flashing"
-                      ? "bg-amber-500 animate-pulse w-full"
-                      : flashStage === "success"
-                      ? "bg-emerald-500 w-full"
-                      : flashStage === "error"
-                      ? "bg-rose-500 w-full"
-                      : "bg-sky-500 w-0"
-                  }`}
-                />
-              </div>
-
-              {status && (
-                <p
-                  className={`mt-2 rounded-lg p-2 text-center text-[11px] font-medium ring-1 ${
-                    flashStage === "success"
-                      ? "bg-emerald-500/10 text-emerald-500 ring-emerald-500/20"
-                      : flashStage === "error"
-                      ? "bg-rose-500/10 text-rose-500 ring-rose-500/20"
-                      : "bg-amber-500/10 text-amber-500 ring-amber-500/20"
-                  }`}
-                >
-                  {status}
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* Modal Footer Actions */}
-          <div className="mt-4 flex items-center justify-end gap-2.5 border-t border-[var(--border)] pt-3.5">
-            <button
-              type="button"
-              disabled={isUpdating}
-              onClick={onClose}
-              className="rounded-xl px-4 py-2 text-xs font-semibold text-[var(--muted-foreground)] hover:bg-[var(--muted)] transition-colors disabled:opacity-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={isUpdating}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--foreground)] px-4 py-2 text-xs font-semibold text-[var(--card)] hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {isUpdating ? (
-                <>
-                  <RefreshCw className="size-3.5 animate-spin" />
-                  <span>กำลังส่งคำสั่ง...</span>
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="size-3.5" />
-                  <span>กดปุ่มอัปเดต (Trigger OTA)</span>
-                </>
-              )}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
 }
