@@ -673,7 +673,10 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
                       // the "smooth" part.
                       const SOLAR_PATH = "M 480 130 L 480 185 L 460 205 L 250 205";
                       const BATTERY_PATH = "M 310 520 L 250 520 L 220 490 L 220 285";
-                      const LOADS_PATH = "M 250 260 L 420 260 L 450 290 L 650 300";
+                      // Endpoint shifted left to track the Loads box's own
+                      // move (right-32% -> right-40%, per explicit request)
+                      // - it was overshooting past the box before this.
+                      const LOADS_PATH = "M 250 260 L 420 260 L 570 300";
 
                       return (
                         <svg className="absolute inset-0 w-full h-full pointer-events-none z-10 filter drop-shadow-[0_0_8px_rgba(56,189,248,0.4)]" viewBox="0 0 1000 600" preserveAspectRatio="none">
@@ -758,7 +761,7 @@ const loadConsumptionPower = totalPower < 0 ? Math.abs(totalPower) : 0;
                           </div>
 
                           {/* 3. Critical Loads Panel */}
-                          <div className="absolute top-[50%] right-[36%] -translate-y-1/2 bg-slate-900/90 backdrop-blur-xl border border-indigo-500/30 px-2.5 py-1 sm:px-3.5 sm:py-1.5 rounded-lg sm:rounded-xl text-center z-20 shadow-xl shadow-indigo-950/20">
+                          <div className="absolute top-[50%] right-[40%] -translate-y-1/2 bg-slate-900/90 backdrop-blur-xl border border-indigo-500/30 px-2.5 py-1 sm:px-3.5 sm:py-1.5 rounded-lg sm:rounded-xl text-center z-20 shadow-xl shadow-indigo-950/20">
                             <div className="text-[8px] sm:text-[9px] uppercase tracking-widest font-bold text-indigo-400">Loads</div>
                             <div className="text-xs sm:text-sm font-extrabold text-white font-mono">{loadConsumptionPower.toFixed(1)} W</div>
                           </div>
