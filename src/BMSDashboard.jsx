@@ -677,6 +677,15 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
                       // move (right-32% -> right-40%, per explicit request)
                       // - it was overshooting past the box before this.
                       const LOADS_PATH = "M 250 260 L 420 260 L 570 300";
+                      // PEA (grid) -> Loads, from the utility pole on the
+                      // right. Drawn as two separate segments with a real
+                      // gap between them (not just dimmed) - a literal "cut
+                      // line", per explicit request: there's no grid-usage
+                      // reading wired up yet, so this deliberately never
+                      // animates or shows a value, unlike the other three
+                      // routes.
+                      const PEA_PATH_1 = "M 900 240 L 700 240";
+                      const PEA_PATH_2 = "M 660 240 L 630 270";
 
                       return (
                         <svg className="absolute inset-0 w-full h-full pointer-events-none z-10 filter drop-shadow-[0_0_8px_rgba(56,189,248,0.4)]" viewBox="0 0 1000 600" preserveAspectRatio="none">
@@ -725,6 +734,11 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
                             strokeDasharray="0.1 20"
                             style={{ animation: isLoadFlowing ? "dash_forward 2.2s linear infinite" : "none", opacity: 0.95 }}
                           />
+
+                          {/* 4. PEA (grid) -> Home Load - intentionally cut
+                              and static, see PEA_PATH_1/2 comment above. */}
+                          <path d={PEA_PATH_1} fill="none" stroke="#94a3b8" strokeWidth="5" strokeLinecap="round" strokeDasharray="10 8" opacity={0.4} />
+                          <path d={PEA_PATH_2} fill="none" stroke="#94a3b8" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="10 8" opacity={0.4} />
                         </svg>
                       );
                     })()}
@@ -758,6 +772,18 @@ const loadConsumptionPower = totalPower < 0 ? Math.abs(totalPower) : 0;
                           <div className="absolute top-[41%] left-[20%] -translate-x-1/2 -translate-y-1/2 bg-slate-900/90 backdrop-blur-xl border border-sky-500/30 px-3 py-1 sm:px-5 sm:py-1.5 rounded-lg sm:rounded-xl text-center z-20 shadow-xl shadow-sky-950/20 min-w-[90px] sm:min-w-[110px]">
                             <div className="text-[8px] sm:text-[9px] uppercase tracking-widest font-bold text-sky-400">Inverter</div>
                             <div className="text-xs sm:text-sm font-extrabold text-white font-mono">{totalAggregatedPower.toFixed(0)} W</div>
+                          </div>
+
+                          {/* PEA (grid utility pole) Box - placeholder only
+                              for now: no real grid-usage reading is wired up
+                              yet (no formula, no live value), per explicit
+                              request - just the label, matching the cut/
+                              static line above. Neutral gray instead of a
+                              live color so it visually reads as "not active"
+                              alongside the other three boxes. */}
+                          <div className="absolute top-[35%] right-[7%] -translate-y-1/2 bg-slate-900/90 backdrop-blur-xl border border-slate-600/40 px-2.5 py-1 sm:px-3.5 sm:py-1.5 rounded-lg sm:rounded-xl text-center z-20 shadow-xl shadow-black/20">
+                            <div className="text-[8px] sm:text-[9px] uppercase tracking-widest font-bold text-slate-400">PEA</div>
+                            <div className="text-xs sm:text-sm font-extrabold text-slate-500 font-mono">--</div>
                           </div>
 
                           {/* 3. Critical Loads Panel */}
