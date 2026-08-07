@@ -736,9 +736,13 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
                           />
 
                           {/* 4. PEA (grid) -> Home Load - intentionally cut
-                              and static, see PEA_PATH_1/2 comment above. */}
-                          <path d={PEA_PATH_1} fill="none" stroke="#94a3b8" strokeWidth="5" strokeLinecap="round" strokeDasharray="10 8" opacity={0.4} />
-                          <path d={PEA_PATH_2} fill="none" stroke="#94a3b8" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="10 8" opacity={0.4} />
+                              and static, see PEA_PATH_1/2 comment above. Same
+                              round-marching-dot styling as the other 3 routes
+                              (near-zero dash + round linecap) for visual
+                              consistency, just un-animated and dimmed to read
+                              as inactive. */}
+                          <path d={PEA_PATH_1} fill="none" stroke="#94a3b8" strokeWidth="6" strokeLinecap="round" strokeDasharray="0.1 15" opacity={0.5} />
+                          <path d={PEA_PATH_2} fill="none" stroke="#94a3b8" strokeWidth="6" strokeLinecap="round" strokeDasharray="0.1 15" opacity={0.5} />
                         </svg>
                       );
                     })()}
