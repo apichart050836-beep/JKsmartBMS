@@ -298,6 +298,16 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
   const active = packs.find((p) => p.id === activeBmsId) ?? packs[0];
   const activeConfig = slots.find((b) => b.id === activeBmsId) ?? slots[0];
 
+  // Moved up from further below (next to the offline modal) so
+  // computeAlarms can fold "device offline" into the same Alarms list as
+  // the threshold-breach alarms, per explicit request to surface every
+  // abnormal status in one place - was previously only visible via the
+  // separate offline modal.
+  const STALE_AFTER_MS = 15000;
+  const isOnline = active.isLive
+    ? !!active.firebaseConnected && !!active.lastUpdateAt && (now.getTime() - active.lastUpdateAt < STALE_AFTER_MS)
+    : false;
+
   useEffect(() => {
     onSoftwareVersionChange?.({
       software: active.info?.software_version ?? null,
@@ -365,7 +375,7 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
   const fleetChargedWhToday = fleetDailyEnergies.reduce((sum, e) => sum + (e.chargedWh || 0), 0);
   const fleetDischargedAhToday = fleetDailyEnergies.reduce((sum, e) => sum + (e.dischargedAh || 0), 0);
   const fleetDischargedWhToday = fleetDailyEnergies.reduce((sum, e) => sum + (e.dischargedWh || 0), 0);
-  const activeAlarms = computeAlarms(active, settings);
+  const activeAlarms = computeAlarms(active, settings, { isOnline });
   const activeDeviceMac = active.info?.jk_mac_address || activeConfig.deviceKey;
   const activeDeviceLabel = settings.myCustomName || activeDeviceMac;
 
@@ -521,11 +531,6 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
     [settings.cellOvp, settings.cellUvp]
   );
 
-  const STALE_AFTER_MS = 15000;
-  const isOnline = active.isLive
-    ? !!active.firebaseConnected && !!active.lastUpdateAt && (now.getTime() - active.lastUpdateAt < STALE_AFTER_MS)
-    : false;
-
   const [confirmedOffline, setConfirmedOffline] = useState(false);
   useEffect(() => {
     if (isOnline) {
@@ -678,14 +683,11 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
                       // - it was overshooting past the box before this.
                       const LOADS_PATH = "M 250 260 L 420 260 L 570 300";
                       // PEA (grid) -> Loads, from the utility pole on the
-                      // right. Drawn as two separate segments with a real
-                      // gap between them (not just dimmed) - a literal "cut
-                      // line", per explicit request: there's no grid-usage
-                      // reading wired up yet, so this deliberately never
-                      // animates or shows a value, unlike the other three
-                      // routes.
-                      const PEA_PATH_1 = "M 900 240 L 700 240";
-                      const PEA_PATH_2 = "M 660 240 L 630 270";
+                      // right. Continuous line (no gap) per explicit
+                      // request - still static/un-animated though, since
+                      // there's no grid-usage reading wired up yet, so it
+                      // never shows a value unlike the other three routes.
+                      const PEA_PATH = "M 900 240 L 700 240 L 630 270";
 
                       return (
                         <svg className="absolute inset-0 w-full h-full pointer-events-none z-10 filter drop-shadow-[0_0_8px_rgba(56,189,248,0.4)]" viewBox="0 0 1000 600" preserveAspectRatio="none">
@@ -735,14 +737,14 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
                             style={{ animation: isLoadFlowing ? "dash_forward 2.2s linear infinite" : "none", opacity: 0.95 }}
                           />
 
-                          {/* 4. PEA (grid) -> Home Load - intentionally cut
-                              and static, see PEA_PATH_1/2 comment above. Same
-                              round-marching-dot styling as the other 3 routes
-                              (near-zero dash + round linecap) for visual
-                              consistency, just un-animated and dimmed to read
-                              as inactive. */}
-                          <path d={PEA_PATH_1} fill="none" stroke="#94a3b8" strokeWidth="6" strokeLinecap="round" strokeDasharray="0.1 15" opacity={0.5} />
-                          <path d={PEA_PATH_2} fill="none" stroke="#94a3b8" strokeWidth="6" strokeLinecap="round" strokeDasharray="0.1 15" opacity={0.5} />
+                          {/* 4. PEA (grid) -> Home Load - static (no
+                              animation, no value - see PEA_PATH comment
+                              above), but a continuous unbroken line of round
+                              dots now, per explicit request, same
+                              round-marching-dot styling as the other 3
+                              routes (near-zero dash + round linecap), just
+                              dimmed to read as inactive/not-yet-metered. */}
+                          <path d={PEA_PATH} fill="none" stroke="#94a3b8" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="0.1 15" opacity={0.5} />
                         </svg>
                       );
                     })()}

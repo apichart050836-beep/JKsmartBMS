@@ -4,9 +4,28 @@
 // against the protection thresholds already configured in Settings
 // (REMOTE_SETTINGS_MAP in BMSDashboard.jsx). This is a live snapshot, not a
 // historical log - it reflects what's breached right now.
-export function computeAlarms(active, settings) {
+//
+// `isOnline` (optional third arg) folds in the same offline/stale-data check
+// BMSDashboard.jsx already used for its separate offline modal, per explicit
+// request to show every abnormal system status in one place, not just cell/
+// temp/current threshold breaches.
+export function computeAlarms(active, settings, { isOnline } = {}) {
   if (!active || !settings) return [];
   const alarms = [];
+
+  if (active.isLive && isOnline === false) {
+    alarms.push({
+      id: "offline",
+      label: "Device Offline",
+      value: "หลุดการเชื่อมต่อ",
+      limit: "ไม่มีข้อมูลใหม่เข้ามา",
+      severity: "critical",
+    });
+    // No live status to evaluate against thresholds while offline - the
+    // last-known values are stale, so checking them below would just
+    // report a frozen snapshot as if it were still happening live.
+    return alarms;
+  }
 
   const liveCells = (active.cells ?? []).filter((v) => v > 0);
   if (liveCells.length) {
@@ -55,6 +74,15 @@ export function computeAlarms(active, settings) {
       severity: "critical",
     });
   }
+  if (active.chargeMOS && Math.min(t1, t2) < settings.chgUtp) {
+    alarms.push({
+      id: "chgUtp",
+      label: "Charge Under-Temperature",
+      value: `${Math.min(t1, t2).toFixed(1)}°C`,
+      limit: `< ${settings.chgUtp}°C`,
+      severity: "warning",
+    });
+  }
   if (active.dischargeMOS && Math.max(t1, t2) > settings.dsgOtp) {
     alarms.push({
       id: "dsgOtp",
@@ -89,6 +117,17 @@ export function computeAlarms(active, settings) {
       label: "Charge Over-Current",
       value: `${active.current.toFixed(1)} A`,
       limit: `> ${settings.contChgCurr} A`,
+      severity: "critical",
+    });
+  }
+  // current is signed (negative while discharging - see useBmsPackLive.js),
+  // so the breach check compares magnitude against the discharge limit.
+  if (active.dischargeMOS && -active.current > settings.contDsgCurr) {
+    alarms.push({
+      id: "dsgOcp",
+      label: "Discharge Over-Current",
+      value: `${active.current.toFixed(1)} A`,
+      limit: `> ${settings.contDsgCurr} A`,
       severity: "critical",
     });
   }
