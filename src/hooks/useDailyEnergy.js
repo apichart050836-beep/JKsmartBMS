@@ -12,7 +12,9 @@ function bangkokDateStr(d = new Date()) {
   return `${bkk.getUTCFullYear()}-${String(bkk.getUTCMonth() + 1).padStart(2, "0")}-${String(bkk.getUTCDate()).padStart(2, "0")}`;
 }
 
-const POLL_MS = 60_000;
+// Matches the telemetry snapshot cadence so the "Ah สูงสุดที่วัดได้" card
+// advances as soon as the latest five-second reading is persisted.
+const POLL_MS = 5_000;
 const EMPTY = { chargedAh: 0, dischargedAh: 0, chargedWh: 0, dischargedWh: 0 };
 
 // Real today's-so-far charged/discharged Ah & Wh, derived server-side from
