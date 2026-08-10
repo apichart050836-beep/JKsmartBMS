@@ -5,11 +5,12 @@ import { allowedHubIds } from "./hubAccess.js";
 import { readPath } from "./firebaseRead.js";
 import { isAllowedOrigin } from "./corsOrigin.js";
 
-// 2s - explicit request (2026-08-01) for minimum delay, reduced from 5s.
+// 1s - the power-flow and peak cards use this stream directly, so a new
+// Solar PV/Load maximum appears on the open dashboard without a visible lag.
 // Still a plain REST poll per watched path, not a real push - see the
 // .once()-vs-.on() reasoning below for why this stays polling-based rather
 // than switching to a live listener.
-const REST_POLL_MS = 2000;
+const REST_POLL_MS = 1000;
 
 // Watches a single Firebase path and calls emit(data) whenever a poll
 // delivers something. Always polls via readPath (Admin SDK once()-with-

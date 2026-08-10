@@ -349,7 +349,7 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
   // today, with when it happened - for the Net Battery/Load Power cards,
   // per explicit request. hubId alone (no bmsKey) since this is a hub-wide
   // sum, same scope as totalAggregatedPower below.
-  const peakToday = usePeakToday(activeConfig.hubId);
+  const peakToday = usePeakToday(activeConfig.hubId, totalAggregatedPower);
 
   // Same unrolled-per-slot pattern as bms0..bms9 above (hooks can't be
   // called in a loop) - fleet-wide today's charged Ah/Wh across every real
@@ -836,14 +836,14 @@ const loadConsumptionPower = totalPower < 0 ? Math.abs(totalPower) : 0;
                     
                     <div className="bg-slate-900/70 border border-slate-800/80 p-3 rounded-2xl flex items-center justify-between shadow-sm backdrop-blur-sm">
                       <div>
-                        <div className="text-[11px] font-medium text-slate-400">Net Battery Power</div>
+                        <div className="text-[11px] font-medium text-slate-400">Solar PV Power</div>
                         <div className="text-sm font-bold text-teal-400 font-mono mt-0.5">{totalAggregatedPower.toFixed(0)} W</div>
                         <div className="text-[10px] text-white font-mono mt-0.5">
                           {fleetChargedAhToday.toFixed(1)} Ah · {(fleetChargedWhToday / 1000).toFixed(2)} kWh
                         </div>
                         {peakToday.peakCharge && (
                           <div className="text-[10px] text-teal-300/80 font-mono mt-0.5">
-                            ชาร์จสูงสุด {peakToday.peakCharge.power.toFixed(0)} W ·{" "}
+                            ชาร์จสูงสุด (Solar PV) {peakToday.peakCharge.power.toFixed(0)} W ·{" "}
                             {new Date(peakToday.peakCharge.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                           </div>
                         )}
@@ -853,7 +853,7 @@ const loadConsumptionPower = totalPower < 0 ? Math.abs(totalPower) : 0;
                     
                     <div className="bg-slate-900/70 border border-slate-800/80 p-3 rounded-2xl flex items-center justify-between shadow-sm backdrop-blur-sm">
                       <div>
-                        <div className="text-[11px] font-medium text-slate-400">Net Load Power</div>
+                        <div className="text-[11px] font-medium text-slate-400">Load Power</div>
                         {/* No day/night gate anymore - computed continuously,
                             per explicit request. Note this can only ever be
                             the load NOT covered by solar (i.e. what the
@@ -874,7 +874,7 @@ const loadConsumptionPower = totalPower < 0 ? Math.abs(totalPower) : 0;
                         </div>
                         {peakToday.peakDischarge && (
                           <div className="text-[10px] text-indigo-300/80 font-mono mt-0.5">
-                            ดิสชาร์จสูงสุด {Math.abs(peakToday.peakDischarge.power).toFixed(0)} W ·{" "}
+                            Load สูงสุด {Math.abs(peakToday.peakDischarge.power).toFixed(0)} W ·{" "}
                             {new Date(peakToday.peakDischarge.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                           </div>
                         )}
@@ -1158,4 +1158,3 @@ const loadConsumptionPower = totalPower < 0 ? Math.abs(totalPower) : 0;
 
   
 }
-

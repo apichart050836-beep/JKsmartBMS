@@ -7,12 +7,13 @@ import { flattenHubs } from "../src/lib/flattenHubs.js";
 // per real BMS device into telemetry_log on a fixed interval. Runs
 // independently of any connected client/socket (fleet-wide, not per
 // session), so history keeps accumulating even with the dashboard closed.
-const SNAPSHOT_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes, steady-state
+// Keep historical peaks close to the live dashboard too. Live clients update
+// immediately from the socket; this 5-second cadence makes the same peak
+// durable for a reload or another client without the former five-minute lag.
+const SNAPSHOT_INTERVAL_MS = 5 * 1000;
 // The Daily chart needs 4+ real snapshots before it drops the mock-data
-// fallback (see ChargeDischargeChart.jsx) - at a flat 5-minute cadence
-// that's ~20 minutes after every server restart. Snapshotting faster for
-// the first few reads gets it there in ~2 minutes instead, without
-// changing the steady-state cadence (or telemetry_log's row shape) at all.
+// fallback (see ChargeDischargeChart.jsx). A short warm-up gets those first
+// points in quickly after a server restart without changing the row shape.
 const WARMUP_INTERVAL_MS = 30 * 1000; // 30 seconds
 const WARMUP_SNAPSHOTS = 5;
 
