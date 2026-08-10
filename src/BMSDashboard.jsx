@@ -349,7 +349,7 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
   // today, with when it happened - for the Net Battery/Load Power cards,
   // per explicit request. hubId alone (no bmsKey) since this is a hub-wide
   // sum, same scope as totalAggregatedPower below.
-  const peakToday = usePeakToday(activeConfig.hubId, totalAggregatedPower, totalRemainingAh);
+  const peakToday = usePeakToday(activeConfig.hubId, totalAggregatedPower, totalAggregatedCurrent);
 
   // Same unrolled-per-slot pattern as bms0..bms9 above (hooks can't be
   // called in a loop) - fleet-wide today's charged Ah/Wh across every real
@@ -839,11 +839,11 @@ const loadConsumptionPower = totalPower < 0 ? Math.abs(totalPower) : 0;
                         <div className="text-[11px] font-medium text-slate-400">Net Battery Power</div>
                         <div className="text-sm font-bold text-teal-400 font-mono mt-0.5">{totalAggregatedPower.toFixed(0)} W</div>
                         <div className="text-[10px] text-white font-mono mt-0.5">
-                          พลังงานวันนี้ {(fleetChargedWhToday / 1000).toFixed(2)} kWh
+                          Ah สูงสุดที่วัดได้ {fleetChargedAhToday.toFixed(1)} Ah · {(fleetChargedWhToday / 1000).toFixed(2)} kWh
                         </div>
                         {peakToday.peakCharge && (
                           <div className="text-[10px] text-teal-300/80 font-mono mt-0.5">
-                            ชาร์จสูงสุด {peakToday.peakCharge.power.toFixed(0)} W · {Number(peakToday.peakCharge.ah ?? 0).toFixed(1)} Ah ·{" "}
+                            ชาร์จสูงสุด {peakToday.peakCharge.power.toFixed(0)} W · {Number(peakToday.peakCharge.current ?? 0).toFixed(1)} A ·{" "}
                             {new Date(peakToday.peakCharge.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                           </div>
                         )}
@@ -870,11 +870,11 @@ const loadConsumptionPower = totalPower < 0 ? Math.abs(totalPower) : 0;
                           {(totalAggregatedPower < 0 ? Math.abs(totalAggregatedPower) : 0).toFixed(0)} W
                         </div>
                         <div className="text-[10px] text-white font-mono mt-0.5">
-                          พลังงานวันนี้ {(fleetDischargedWhToday / 1000).toFixed(2)} kWh
+                          Ah สูงสุดที่วัดได้ {fleetDischargedAhToday.toFixed(1)} Ah · {(fleetDischargedWhToday / 1000).toFixed(2)} kWh
                         </div>
                         {peakToday.peakDischarge && (
                           <div className="text-[10px] text-indigo-300/80 font-mono mt-0.5">
-                            Load สูงสุด {Math.abs(peakToday.peakDischarge.power).toFixed(0)} W · {Number(peakToday.peakDischarge.ah ?? 0).toFixed(1)} Ah ·{" "}
+                            Load สูงสุด {Math.abs(peakToday.peakDischarge.power).toFixed(0)} W · {Math.abs(Number(peakToday.peakDischarge.current ?? 0)).toFixed(1)} A ·{" "}
                             {new Date(peakToday.peakDischarge.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                           </div>
                         )}

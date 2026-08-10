@@ -28,7 +28,7 @@ function bangkokDayKey() {
 // server/routes/history.js's /history/peak-today. Each of peakCharge/
 // peakDischarge is either null (nothing in that direction yet today) or
 // { power, ts }.
-export function usePeakToday(hubId, livePower, liveAh) {
+export function usePeakToday(hubId, livePower, liveCurrent) {
   const [peaks, setPeaks] = useState(EMPTY);
   const dayKeyRef = useRef(bangkokDayKey());
 
@@ -69,9 +69,10 @@ export function usePeakToday(hubId, livePower, liveAh) {
       setPeaks(EMPTY);
     }
 
-    // `liveAh` is the summed remaining capacity from every BMS pack at the
-    // exact live moment the new power maximum is seen.
-    const livePeak = { power: livePower, ah: liveAh, ts: Date.now() };
+    // Sum of all BMS currents at exactly the same live moment as the power
+    // high-water mark, so the card never pairs a peak wattage with a current
+    // from another pack or another time.
+    const livePeak = { power: livePower, current: liveCurrent, ts: Date.now() };
     setPeaks((current) =>
       livePower > 0
         ? mergePeaks(current, { peakCharge: livePeak, peakDischarge: null })

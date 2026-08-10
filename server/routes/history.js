@@ -142,7 +142,7 @@ router.get("/:hubId/history/peak-today", requireAuth, (req, res) => {
     .prepare(
       `SELECT ts,
               SUM(COALESCE(pack_voltage, 0) * COALESCE(charge_current, 0)) AS total_power,
-              SUM(COALESCE(capacity_remain, 0)) AS total_ah
+              SUM(COALESCE(charge_current, 0)) AS total_current
        FROM telemetry_log
        WHERE hub_id = ? AND ts >= ? AND ts < ?
        GROUP BY ts
@@ -154,10 +154,10 @@ router.get("/:hubId/history/peak-today", requireAuth, (req, res) => {
   let peakDischarge = null;
   for (const r of rows) {
     if (r.total_power > 0 && (!peakCharge || r.total_power > peakCharge.power)) {
-      peakCharge = { power: r.total_power, ah: r.total_ah, ts: r.ts };
+      peakCharge = { power: r.total_power, current: r.total_current, ts: r.ts };
     }
     if (r.total_power < 0 && (!peakDischarge || r.total_power < peakDischarge.power)) {
-      peakDischarge = { power: r.total_power, ah: r.total_ah, ts: r.ts };
+      peakDischarge = { power: r.total_power, current: r.total_current, ts: r.ts };
     }
   }
   res.json({ peakCharge, peakDischarge });
