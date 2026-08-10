@@ -839,7 +839,7 @@ const loadConsumptionPower = totalPower < 0 ? Math.abs(totalPower) : 0;
                         <div className="text-[11px] font-medium text-slate-400">Net Battery Power</div>
                         <div className="text-sm font-bold text-teal-400 font-mono mt-0.5">{totalAggregatedPower.toFixed(0)} W</div>
                         <div className="text-[10px] text-white font-mono mt-0.5">
-                          Ah สูงสุดที่วัดได้ {fleetChargedAhToday.toFixed(1)} Ah · {(fleetChargedWhToday / 1000).toFixed(2)} kWh
+                          {fleetChargedAhToday.toFixed(1)} Ah · {(fleetChargedWhToday / 1000).toFixed(2)} kWh
                         </div>
                         {peakToday.peakCharge && (
                           <div className="text-[10px] text-teal-300/80 font-mono mt-0.5">
@@ -870,7 +870,7 @@ const loadConsumptionPower = totalPower < 0 ? Math.abs(totalPower) : 0;
                           {(totalAggregatedPower < 0 ? Math.abs(totalAggregatedPower) : 0).toFixed(0)} W
                         </div>
                         <div className="text-[10px] text-white font-mono mt-0.5">
-                          Ah สูงสุดที่วัดได้ {fleetDischargedAhToday.toFixed(1)} Ah · {(fleetDischargedWhToday / 1000).toFixed(2)} kWh
+                          {fleetDischargedAhToday.toFixed(1)} Ah · {(fleetDischargedWhToday / 1000).toFixed(2)} kWh
                         </div>
                         {peakToday.peakDischarge && (
                           <div className="text-[10px] text-indigo-300/80 font-mono mt-0.5">
