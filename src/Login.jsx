@@ -33,12 +33,12 @@ export default function Login() {
     setError("");
     const trimmed = email.trim();
     if (!trimmed) return;
-    // Login shortcut for this one real account - typing "admin" here
+    // Login shortcut for this one real account - typing "poote" here
     // resolves to monggwkp@gmail.com before ever reaching checkEmail/login,
     // so it's a client-side alias only, not a new backend concept. Distinct
     // from the separate "Admin" button below, which logs into a completely
     // different, dedicated Admin-only account via api.adminLogin.
-    const resolved = trimmed.toLowerCase() === "admin" ? "monggwkp@gmail.com" : trimmed;
+    const resolved = trimmed.toLowerCase() === "poote" ? "monggwkp@gmail.com" : trimmed;
     if (resolved !== email) setEmail(resolved);
     setBusy(true);
     try {
