@@ -31,10 +31,18 @@ export default function Login() {
   async function handleEmailSubmit(e) {
     e.preventDefault();
     setError("");
-    if (!email.trim()) return;
+    const trimmed = email.trim();
+    if (!trimmed) return;
+    // Login shortcut for this one real account - typing "admin" here
+    // resolves to monggwkp@gmail.com before ever reaching checkEmail/login,
+    // so it's a client-side alias only, not a new backend concept. Distinct
+    // from the separate "Admin" button below, which logs into a completely
+    // different, dedicated Admin-only account via api.adminLogin.
+    const resolved = trimmed.toLowerCase() === "admin" ? "monggwkp@gmail.com" : trimmed;
+    if (resolved !== email) setEmail(resolved);
     setBusy(true);
     try {
-      const { exists, needsPassword } = await api.checkEmail(email.trim());
+      const { exists, needsPassword } = await api.checkEmail(resolved);
       if (!exists) {
         // Same generic message login itself uses - don't confirm/deny an
         // email's existence any more precisely than that.
@@ -45,7 +53,7 @@ export default function Login() {
         // showing a password field. Password body is unused server-side
         // for this branch (server/routes/auth.js), sent empty here.
         try {
-          await api.login(email.trim(), "");
+          await api.login(resolved, "");
           await refresh();
         } catch {
           setError("เข้าสู่ระบบไม่สำเร็จ กรุณาลองใหม่");
@@ -152,7 +160,7 @@ export default function Login() {
               <div className="flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--muted)] px-3 py-2.5">
                 <Mail className="size-4 text-[var(--muted-foreground)]" />
                 <input
-                  type="email"
+                  type="text"
                   autoFocus
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
