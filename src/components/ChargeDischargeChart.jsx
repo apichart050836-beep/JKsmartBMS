@@ -42,13 +42,23 @@ const DISCHARGE_COLOR = "#f97316";
 // looks like a flat, broken chart while real accumulated history is still
 // thin. Deterministic (no Math.random), always clearly labeled as mock in
 // the UI, never mistaken for real telemetry.
+// Wh figures are derived from the Ah figures via a plausible nominal pack
+// voltage (16S LiFePO4, ~3.2V/cell - matches this app's own default cell
+// count elsewhere in BMSDashboard.jsx) purely so the mock tooltip/stat kWh
+// numbers look proportionate to the mock Ah numbers - never real telemetry,
+// same as the rest of this mock series.
+const MOCK_NOMINAL_VOLTAGE = 51.2;
 function mockBarSeries(labels, chargedAmp, dischargedAmp) {
   return labels.map((label, i) => {
     const phase = (i / labels.length) * Math.PI * 2;
+    const charged = Math.max(0, chargedAmp * (0.55 + 0.45 * Math.sin(phase + 0.6)));
+    const discharged = Math.max(0, dischargedAmp * (0.55 + 0.45 * Math.sin(phase + 3.6)));
     return {
       label,
-      charged: Math.max(0, chargedAmp * (0.55 + 0.45 * Math.sin(phase + 0.6))),
-      discharged: -Math.max(0, dischargedAmp * (0.55 + 0.45 * Math.sin(phase + 3.6))),
+      charged,
+      discharged: -discharged,
+      chargedWh: charged * MOCK_NOMINAL_VOLTAGE,
+      dischargedWh: discharged * MOCK_NOMINAL_VOLTAGE,
     };
   });
 }
@@ -148,11 +158,17 @@ function BarTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
   const charged = payload.find((p) => p.dataKey === "charged")?.value ?? 0;
   const discharged = Math.abs(payload.find((p) => p.dataKey === "discharged")?.value ?? 0);
+  const chargedWh = payload[0]?.payload?.chargedWh ?? 0;
+  const dischargedWh = payload[0]?.payload?.dischargedWh ?? 0;
   return (
     <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs shadow-lg">
       <p className="mb-1 font-semibold text-[var(--foreground)]">{label}</p>
-      <p className="tabular-nums" style={{ color: CHARGE_COLOR }}>Charged · {charged.toFixed(2)} Ah</p>
-      <p className="tabular-nums" style={{ color: DISCHARGE_COLOR }}>Discharged · {discharged.toFixed(2)} Ah</p>
+      <p className="tabular-nums" style={{ color: CHARGE_COLOR }}>
+        Charged · {charged.toFixed(2)} Ah · {(chargedWh / 1000).toFixed(2)} kWh
+      </p>
+      <p className="tabular-nums" style={{ color: DISCHARGE_COLOR }}>
+        Discharged · {discharged.toFixed(2)} Ah · {(dischargedWh / 1000).toFixed(2)} kWh
+      </p>
     </div>
   );
 }
@@ -292,25 +308,29 @@ export function ChargeDischargeChart({ history = [], hubId, bmsKey }) {
   // with real day/month labels, not a blank one with no axis at all.
   const monthlySkeleton = useMemo(() => {
     const daysInMonth = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getDate();
-    return Array.from({ length: daysInMonth }, (_, i) => ({ label: String(i + 1), charged: 0, discharged: 0 }));
+    return Array.from({ length: daysInMonth }, (_, i) => ({ label: String(i + 1), charged: 0, discharged: 0, chargedWh: 0, dischargedWh: 0 }));
   }, [view === "monthly" ? toMonthStr(cursor) : null]);
   const yearlySkeleton = useMemo(() => {
     const y = cursor.getFullYear();
     return Array.from({ length: 12 }, (_, i) =>
       new Date(y, i, 1).toLocaleDateString("th-TH", { month: "short" })
-    ).map((label) => ({ label, charged: 0, discharged: 0 }));
+    ).map((label) => ({ label, charged: 0, discharged: 0, chargedWh: 0, dischargedWh: 0 }));
   }, [view === "yearly" ? cursor.getFullYear() : null]);
 
   const realBarData =
     view === "monthly"
       ? monthlySkeleton.map((d, i) => {
           const real = monthly?.days?.[i];
-          return real ? { label: d.label, charged: real.chargedAh, discharged: -real.dischargedAh } : d;
+          return real
+            ? { label: d.label, charged: real.chargedAh, discharged: -real.dischargedAh, chargedWh: real.chargedWh, dischargedWh: real.dischargedWh }
+            : d;
         })
       : view === "yearly"
         ? yearlySkeleton.map((m, i) => {
             const real = yearly?.months?.[i];
-            return real ? { label: m.label, charged: real.chargedAh, discharged: -real.dischargedAh } : m;
+            return real
+              ? { label: m.label, charged: real.chargedAh, discharged: -real.dischargedAh, chargedWh: real.chargedWh, dischargedWh: real.dischargedWh }
+              : m;
           })
         : [];
   const hasBarData = realBarData.some((d) => d.charged !== 0 || d.discharged !== 0);
@@ -323,16 +343,23 @@ export function ChargeDischargeChart({ history = [], hubId, bmsKey }) {
       )
     : realBarData;
 
-  // Fixed 20 Ah steps, symmetric around 0 (charged bars go up, discharged go
-  // down) - a clean, predictable scale instead of whatever odd numbers
-  // recharts' auto-domain would otherwise pick. Floor of 100 guarantees
-  // 0/20/40/60/80/100 are always on the axis even on a low-activity day;
+  // Symmetric around 0 (charged bars go up, discharged go down) - a clean,
+  // predictable scale instead of whatever odd numbers recharts' auto-domain
+  // would otherwise pick, per explicit request for 0/100/200/300 on Monthly
+  // and 0/500/1000/... on Yearly (yearly totals run much higher than
+  // monthly, so it gets its own coarser step - same reasoning, different
+  // per-view scale). The floor (3x the step) guarantees at least those
+  // first few ticks are always on the axis even on a low-activity period;
   // it only grows past that if real data actually exceeds it.
-  const AH_STEP = 20;
-  const barMaxAbs = Math.max(100, ...barData.flatMap((d) => [Math.abs(d.charged), Math.abs(d.discharged)]));
+  const AH_STEP = view === "yearly" ? 500 : 100;
+  const barMaxAbs = Math.max(AH_STEP * 3, ...barData.flatMap((d) => [Math.abs(d.charged), Math.abs(d.discharged)]));
   const barAxisMax = Math.ceil(barMaxAbs / AH_STEP) * AH_STEP;
   const barTicks = [];
   for (let v = -barAxisMax; v <= barAxisMax; v += AH_STEP) barTicks.push(v);
+  // Yearly totals can run into 4+ digits (e.g. "1500Ah") where Monthly
+  // stays at 3 - a fixed width clipped those wider labels, so it now grows
+  // with the actual longest tick instead of assuming 3 digits forever.
+  const barAxisWidth = 20 + String(barAxisMax).length * 8;
 
   const fillId = `fill-${gradientId}`;
   const strokeId = `stroke-${gradientId}`;
@@ -359,11 +386,18 @@ export function ChargeDischargeChart({ history = [], hubId, bmsKey }) {
   const periodTotals = useMemo(() => {
     if (view === "daily") {
       if (!hasRealDaily || !daily?.totals) return null;
-      return { chargedAh: daily.totals.chargedAh, dischargedAh: daily.totals.dischargedAh };
+      return {
+        chargedAh: daily.totals.chargedAh,
+        dischargedAh: daily.totals.dischargedAh,
+        chargedWh: daily.totals.chargedWh,
+        dischargedWh: daily.totals.dischargedWh,
+      };
     }
     return {
       chargedAh: barData.reduce((sum, d) => sum + (d.charged || 0), 0),
       dischargedAh: barData.reduce((sum, d) => sum + Math.abs(d.discharged || 0), 0),
+      chargedWh: barData.reduce((sum, d) => sum + (d.chargedWh || 0), 0),
+      dischargedWh: barData.reduce((sum, d) => sum + (d.dischargedWh || 0), 0),
     };
   }, [view, hasRealDaily, daily, barData]);
 
@@ -462,8 +496,16 @@ export function ChargeDischargeChart({ history = [], hubId, bmsKey }) {
               value={`${Math.abs(dailyPeaks.peakDischarge.current).toFixed(1)} A · ${dailyPeaks.peakDischarge.time}`}
             />
           )}
-          <StatChip color={CHARGE_COLOR} label="รวมชาร์จ" value={`${periodTotals.chargedAh.toFixed(1)} Ah`} />
-          <StatChip color={DISCHARGE_COLOR} label="รวมดิสชาร์จ" value={`${periodTotals.dischargedAh.toFixed(1)} Ah`} />
+          <StatChip
+            color={CHARGE_COLOR}
+            label="รวมชาร์จ"
+            value={`${periodTotals.chargedAh.toFixed(1)} Ah · ${(periodTotals.chargedWh / 1000).toFixed(2)} kWh`}
+          />
+          <StatChip
+            color={DISCHARGE_COLOR}
+            label="รวมดิสชาร์จ"
+            value={`${periodTotals.dischargedAh.toFixed(1)} Ah · ${(periodTotals.dischargedWh / 1000).toFixed(2)} kWh`}
+          />
         </div>
       )}
 
@@ -570,7 +612,7 @@ export function ChargeDischargeChart({ history = [], hubId, bmsKey }) {
                 tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
                 axisLine={false}
                 tickLine={false}
-                width={36}
+                width={barAxisWidth}
                 unit="Ah"
                 domain={[-barAxisMax, barAxisMax]}
                 ticks={barTicks}

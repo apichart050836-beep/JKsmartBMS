@@ -4,8 +4,6 @@ import { api } from "./lib/apiClient.js";
 import { useAuth } from "./context/AuthContext.jsx";
 import { ThemeToggle } from "./components/ThemeToggle.jsx";
 
-const SAVED_EMAILS = ["monggwkp@gmail.com"];
-
 // Two-step form (Gmail first, then password) per the requested flow - not
 // real Google OAuth, this app owns and hashes the password itself
 // server-side, so there is no Google sign-in popup here.
@@ -151,19 +149,6 @@ export default function Login() {
           <form onSubmit={handleEmailSubmit} className="space-y-4">
             <div>
               <label className="mb-1.5 block text-xs font-semibold text-[var(--muted-foreground)]">Email</label>
-              <select
-                aria-label="Saved email accounts"
-                value={SAVED_EMAILS.includes(email) ? email : ""}
-                onChange={(e) => setEmail(e.target.value)}
-                className="mb-2 w-full rounded-xl border border-[var(--border)] bg-[var(--muted)] px-3 py-2.5 text-sm text-[var(--foreground)] outline-none focus:border-[var(--brand)]"
-              >
-                <option value="">เลือกอีเมลที่บันทึกไว้</option>
-                {SAVED_EMAILS.map((savedEmail) => (
-                  <option key={savedEmail} value={savedEmail}>
-                    {savedEmail}
-                  </option>
-                ))}
-              </select>
               <div className="flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--muted)] px-3 py-2.5">
                 <Mail className="size-4 text-[var(--muted-foreground)]" />
                 <input
