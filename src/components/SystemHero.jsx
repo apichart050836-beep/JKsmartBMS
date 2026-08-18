@@ -10,7 +10,10 @@ import {
 } from "lucide-react";
 import { statusTone } from "../lib/tone.js";
 import { ElectricGauge } from "../ElectricGauge.jsx";
- 
+
+
+// Full-scale reading on the Power card's radial gauge, per explicit request.
+const POWER_GAUGE_MAX = 3500;
 
 const HEALTH_TONE_TEXT = {
     excellent: "text-emerald-600",
@@ -404,7 +407,7 @@ return (
                                         strokeWidth="6"
                                         fill="transparent"
                                         strokeDasharray="155 235"
-                                        strokeDashoffset={155 - (155 * Math.min(Math.abs(power), 6000)) / 6000}
+                                        strokeDashoffset={155 - (155 * Math.min(Math.abs(power), POWER_GAUGE_MAX)) / POWER_GAUGE_MAX}
                                         strokeLinecap="round"
                                         className="transition-all duration-700 ease-out"
                                     />
@@ -433,7 +436,7 @@ return (
 
                                 {power !== 0 &&
                                     (() => {
-                                        const frac = Math.min(Math.abs(power), 6000) / 6000;
+                                        const frac = Math.min(Math.abs(power), POWER_GAUGE_MAX) / POWER_GAUGE_MAX;
                                         const tipDeg = -210 + frac * 240;
                                         const tipRad = (tipDeg * Math.PI) / 180;
                                         const tx = 55 + 37 * Math.cos(tipRad);
@@ -445,14 +448,19 @@ return (
                                         );
                                     })()}
 
+                                {/* 8 ticks in clean 500W steps (0..3500) instead of
+                                    the old 1k steps (0..6000) - 1k steps would have
+                                    left only 4 ticks across the arc for the new,
+                                    smaller max, per explicit request. */}
                                 {[
                                     { val: "0", angle: 150, showLabel: true },
-                                    { val: "1k", angle: 190, showLabel: true },
-                                    { val: "2k", angle: 230, showLabel: true },
-                                    { val: "3k", angle: 270, showLabel: true },
-                                    { val: "4k", angle: 310, showLabel: true },
-                                    { val: "5k", angle: 350, showLabel: true },
-                                    { val: "6k", angle: 30, showLabel: true },
+                                    { val: "0.5k", angle: 184.3, showLabel: true },
+                                    { val: "1k", angle: 218.6, showLabel: true },
+                                    { val: "1.5k", angle: 252.9, showLabel: true },
+                                    { val: "2k", angle: 287.1, showLabel: true },
+                                    { val: "2.5k", angle: 321.4, showLabel: true },
+                                    { val: "3k", angle: 355.7, showLabel: true },
+                                    { val: "3.5k", angle: 30, showLabel: true },
                                 ].map(({ val, angle, showLabel }) => {
                                     const rad = (angle * Math.PI) / 180;
                                     const r1 = 41;
@@ -529,7 +537,7 @@ return (
 
                     <div className="flex items-center justify-between border-t border-[var(--border)]/80 pt-2 text-xs text-[var(--muted-foreground)]">
                         <span>Max Gauge Limit</span>
-                        <span className="font-bold text-[var(--foreground)] tabular-nums">6,000 W</span>
+                        <span className="font-bold text-[var(--foreground)] tabular-nums">{POWER_GAUGE_MAX.toLocaleString()} W</span>
                     </div>
                 </div>
             </div>

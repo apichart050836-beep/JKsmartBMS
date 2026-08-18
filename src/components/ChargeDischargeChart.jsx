@@ -294,10 +294,11 @@ export function ChargeDischargeChart({ history = [], hubId, bmsKey }) {
   const maxV = Math.max(0, ...values);
   const minV = Math.min(0, ...values);
 
-  // Fixed 10A steps on a single unsigned axis (0 upward) - both series climb
+  // Fixed 20A steps on a single unsigned axis (0 upward) - both series climb
   // from the same baseline now, so there's no need for a symmetric +/- scale.
-  const A_STEP = 10;
-  const areaAxisMax = Math.ceil(Math.max(10, Math.abs(maxV), Math.abs(minV)) / A_STEP) * A_STEP;
+  // Per explicit request: 0/20/40/... instead of the old 0/10/20/...
+  const A_STEP = 20;
+  const areaAxisMax = Math.ceil(Math.max(A_STEP, Math.abs(maxV), Math.abs(minV)) / A_STEP) * A_STEP;
   const areaTicks = [];
   for (let v = 0; v <= areaAxisMax; v += A_STEP) areaTicks.push(v);
 
