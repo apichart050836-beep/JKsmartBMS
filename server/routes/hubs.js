@@ -3,7 +3,6 @@ import { requireAuth } from "../middleware/requireAuth.js";
 import { requireFirebase } from "../middleware/requireFirebase.js";
 import { allowedHubIds, canAccessHub } from "../hubAccess.js";
 import { readPath, writePath } from "../firebaseRead.js";
-import { isMqttConfigured, publishOtaCommand } from "../mqttClient.js";
 import { db } from "../db.js";
 
 const router = Router();
@@ -116,17 +115,15 @@ router.patch("/:hubId/location", requireAuth, requireFirebase, async (req, res) 
   }
 });
 
-// Real OTA trigger - re-PUBLISHES this device's last-targeted firmware
-// command to its own MQTT topic (server/mqttClient.js), read back from
-// firmware_targets (written by the admin's upload panel, see
-// server/routes/firmware.js - see that table's schema.sql comment for why
-// this lookup exists instead of just re-sending update_flag=true: MQTT has
-// no "current value" a device can poll, unlike the Firebase node this
-// replaced). The ESP32's own firmware subscribes to that topic and
-// self-flashes on arrival; the server never talks to the device directly.
-// Any session that owns this hub may call it (not admin-only) since it's
-// the "user presses the Update button on their own dashboard" flow.
-router.patch("/:hubId/firmware/trigger-update", requireAuth, async (req, res) => {
+// Real OTA trigger - flips update_flag=true at this device's own firmware
+// node (written by the admin's upload panel, see server/routes/firmware.js).
+// This is the signal the ESP32's own ota_updater component polls for; the
+// server never talks to the device directly, it only sets the flag the
+// device is already checking on its own schedule. Reverted back from the
+// brief MQTT-publish experiment (per explicit request). Any session that
+// owns this hub may call it (not admin-only) since it's the "user presses
+// the Update button on their own dashboard" flow.
+router.patch("/:hubId/firmware/trigger-update", requireAuth, requireFirebase, async (req, res) => {
   const { hubId } = req.params;
   const { bmsKey } = req.body ?? {};
   if (!isSafeKey(hubId) || !canAccessHub(req.user, hubId)) {
@@ -135,24 +132,8 @@ router.patch("/:hubId/firmware/trigger-update", requireAuth, async (req, res) =>
   if (bmsKey !== undefined && bmsKey !== null && !isSafeKey(bmsKey)) {
     return res.status(400).json({ error: "Invalid request" });
   }
-  if (!isMqttConfigured) {
-    return res.status(503).json({ error: "MQTT not configured" });
-  }
-  const bmsKeyNorm = bmsKey ?? "";
-  const target = db
-    .prepare(`SELECT latest_version, url, uploaded_at FROM firmware_targets WHERE hub_id = ? AND bms_key = ?`)
-    .get(hubId, bmsKeyNorm);
-  if (!target) {
-    return res.status(404).json({ error: "No firmware has been published to this device yet" });
-  }
   try {
-    const mac = bmsKeyNorm || hubId;
-    await publishOtaCommand(hubId, mac, {
-      latest_version: target.latest_version,
-      update_flag: true,
-      uploaded_at: target.uploaded_at,
-      url: target.url,
-    });
+    await writePath(`${devicePath(hubId, bmsKey)}/firmware/update_flag`, true);
     res.json({ ok: true });
   } catch (err) {
     console.error(`PATCH /api/hubs/${hubId}/firmware/trigger-update failed: ${err.message}`);

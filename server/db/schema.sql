@@ -52,34 +52,20 @@ CREATE TABLE IF NOT EXISTS announcements (
 -- on Render's Free-tier disk being ephemeral): this table doesn't survive
 -- a redeploy/restart either unless DB_PATH points at a real attached
 -- persistent disk. This table alone only powers the web dashboard's "latest
--- published" notification badge - the real per-device OTA signal is
--- mqttClient.js's publishOtaCommand (see firmware_targets below), not
--- anything here.
+-- published" notification badge - the real per-device OTA signal is a
+-- Firebase write (see routes/firmware.js), not anything here. md5 is a
+-- fresh MD5 of that upload's exact bytes, computed once at upload time and
+-- carried along into the same Firebase write, for the ESP32 side to verify
+-- the download before flashing.
 CREATE TABLE IF NOT EXISTS firmware_releases (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   version     TEXT NOT NULL,
   filename    TEXT NOT NULL,
   size_bytes  INTEGER NOT NULL,
   data        BLOB NOT NULL,
+  md5         TEXT,
   uploaded_by TEXT NOT NULL,
   uploaded_at INTEGER NOT NULL
-);
-
--- The last firmware actually targeted at each device (per hub_id/bms_key) -
--- replaces Firebase's firmware node as the source of truth once the OTA
--- signal moved to MQTT (per explicit request, 2026-08-06): MQTT is a
--- fire-and-forget publish with no persistent "current value" a device can
--- poll on reconnect, so PATCH /:hubId/firmware/trigger-update (re-sending
--- the same command, e.g. from the auto-update popup's Update button) needs
--- somewhere to read the last-published version/url/release_notes back from.
-CREATE TABLE IF NOT EXISTS firmware_targets (
-  hub_id         TEXT NOT NULL,
-  bms_key        TEXT NOT NULL DEFAULT '',
-  latest_version TEXT NOT NULL,
-  url            TEXT NOT NULL,
-  release_notes  TEXT,
-  uploaded_at    INTEGER NOT NULL,
-  PRIMARY KEY (hub_id, bms_key)
 );
 
 -- The user's own last deliberate Charge Switch command, per device -

@@ -7,13 +7,14 @@ import { api } from "../lib/apiClient.js";
  * just the DB-backed web notification described below):
  *   1. Commits the .bin to the GitHub repo (server/gitStorage.js, unchanged)
  *      and gets back its real raw.githubusercontent.com URL.
- *   2. For every device checked below, PUBLISHES {latest_version, url,
- *      update_flag: true, uploaded_at} straight to that device's own MQTT
- *      topic (server/routes/firmware.js -> server/mqttClient.js) -
- *      jk_bms_hub/{hubId}/{bmsKey}/command - which the ESP32's own firmware
- *      subscribes to and self-flashes from instantly, no polling. This app
- *      still never talks to the ESP32 directly or transfers the file
- *      itself; it only publishes the signal.
+ *   2. For every device checked below, WRITES {latest_version, url, md5,
+ *      release_notes, update_flag: true} to that device's own Firebase
+ *      firmware node (server/routes/firmware.js) - the exact path each
+ *      device's own ota_updater ESPHome component polls on its own
+ *      schedule and self-flashes from when it sees update_flag=true. This
+ *      app still never talks to the ESP32 directly or transfers the file
+ *      itself; it only writes the signal. md5 is computed fresh server-side
+ *      from this exact upload's bytes every time.
  * Every connected user-role dashboard also still gets the existing
  * Socket.IO "firmware:release" notification either way, same as before.
  */
@@ -26,7 +27,7 @@ export function FirmwareUploadModal({ onClose, currentRelease, devices = [] }) {
   const [error, setError] = useState(null);
   const [done, setDone] = useState(false);
   const [gitWarning, setGitWarning] = useState(null);
-  const [mqttResults, setMqttResults] = useState(null);
+  const [firebaseResults, setFirebaseResults] = useState(null);
 
   const deviceOptions = useMemo(
     () =>
@@ -109,12 +110,12 @@ export function FirmwareUploadModal({ onClose, currentRelease, devices = [] }) {
       const targets = deviceOptions.filter((d) => selected.has(targetKey(d))).map((d) => ({ hubId: d.hubId, bmsKey: d.bmsKey }));
       const result = await api.uploadFirmware(version.trim(), file.name, file, { releaseNotes: releaseNotes.trim(), targets });
       setDone(true);
-      setMqttResults(result.mqttResults ?? null);
+      setFirebaseResults(result.firebaseResults ?? null);
       if (result.gitError) {
         // Publishing/notifying still fully succeeded (that's DB-backed, see
         // server/routes/firmware.js) - only the git-backed durable copy
         // failed, so this is a warning to fix later, not a failure to retry.
-        // MQTT publishes are skipped entirely when this happens (there's no
+        // Firebase writes are skipped entirely when this happens (there's no
         // real raw URL to give the device yet).
         setGitWarning(result.gitError);
       } else if (!targets.length) {
@@ -199,7 +200,7 @@ export function FirmwareUploadModal({ onClose, currentRelease, devices = [] }) {
           <div className="max-h-40 space-y-1 overflow-y-auto rounded-xl border border-[var(--border)] p-2">
             {deviceOptions.map((d) => {
               const key = targetKey(d);
-              const fbResult = mqttResults?.find((r) => r.hubId === d.hubId && (r.bmsKey ?? null) === d.bmsKey);
+              const fbResult = firebaseResults?.find((r) => r.hubId === d.hubId && (r.bmsKey ?? null) === d.bmsKey);
               return (
                 <label
                   key={key}
@@ -225,9 +226,9 @@ export function FirmwareUploadModal({ onClose, currentRelease, devices = [] }) {
             })}
           </div>
         )}
-        {done && mqttResults?.some((r) => !r.ok) && (
+        {done && firebaseResults?.some((r) => !r.ok) && (
           <p className="mt-1.5 text-[10px] text-[var(--critical)]">
-            บางอุปกรณ์ส่งสัญญาณ MQTT ไม่สำเร็จ - ไฟล์ยังอยู่บน GitHub ปกติ ลองส่งใหม่ให้อุปกรณ์นั้นได้ภายหลัง
+            บางอุปกรณ์บันทึกสัญญาณลง Firebase ไม่สำเร็จ - ไฟล์ยังอยู่บน GitHub ปกติ ลองส่งใหม่ให้อุปกรณ์นั้นได้ภายหลัง
           </p>
         )}
       </div>
@@ -243,7 +244,7 @@ export function FirmwareUploadModal({ onClose, currentRelease, devices = [] }) {
       {done && !gitWarning && (
         <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-3 text-xs text-emerald-800">
           <p className="font-bold">เผยแพร่สำเร็จ</p>
-          {deviceOptions.length > 0 && !mqttResults?.length && (
+          {deviceOptions.length > 0 && !firebaseResults?.length && (
             <p className="mt-0.5">ยังไม่ได้เลือกอุปกรณ์ - อุปกรณ์จะยังไม่เห็นอัพเดทนี้จนกว่าจะส่งซ้ำพร้อมเลือกเป้าหมาย</p>
           )}
         </div>

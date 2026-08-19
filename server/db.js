@@ -40,4 +40,16 @@ export function migrate() {
   const schemaPath = path.join(__dirname, "db", "schema.sql");
   const schema = fs.readFileSync(schemaPath, "utf8");
   db.exec(schema);
+  addColumnIfMissing("firmware_releases", "md5", "TEXT");
+}
+
+// CREATE TABLE IF NOT EXISTS above only affects a brand-new database - a
+// firmware_releases table that already existed before the md5 column was
+// added (e.g. this exact local dev DB) never gets it just from re-running
+// schema.sql, and ALTER TABLE ADD COLUMN itself isn't safe to blindly re-run
+// (errors if the column's already there), hence the existence check first.
+function addColumnIfMissing(table, column, type) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (cols.some((c) => c.name === column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
 }
