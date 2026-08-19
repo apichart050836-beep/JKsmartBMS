@@ -15,9 +15,7 @@ if "%~1"=="" (
 
 git commit -m "%MSG%"
 if errorlevel 1 (
-    echo Nothing to commit.
-    pause
-    exit /b 0
+    echo Nothing new to commit - still checking for unpushed commits...
 )
 
 git pull --rebase origin main
