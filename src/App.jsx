@@ -14,7 +14,8 @@ import {
   Bluetooth,
   Radio,
   PlusCircle,
-  BatteryCharging
+  BatteryCharging,
+  MessageSquareText
 } from "lucide-react";
 import { ESPLoader, Transport } from "esptool-js";
 import { BrowserRouter } from "react-router-dom";
@@ -24,6 +25,7 @@ import AdminMonitor from "./AdminMonitor.jsx";
 import Login from "./Login.jsx";
 import HomePage from "./HomePage.jsx";
 import BmsManager from "./components/BmsManager.jsx";
+import { EquipmentFeedbackDashboard } from "./components/EquipmentFeedbackDashboard.jsx";
 import { ThemeRoot } from "./components/ThemeRoot.jsx";
 import { ThemeProvider } from "./context/ThemeContext.jsx";
 import { AuthProvider, useAuth } from "./context/AuthContext.jsx";
@@ -580,9 +582,10 @@ function UserMenu({ user }) {
 const PAGES = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, userOnly: true },
   { id: "admin", label: "Admin Monitor", icon: ShieldCheck, adminOnly: true },
+  { id: "feedback", label: "Equipment Feedback", icon: MessageSquareText, adminOnly: true },
   { id: "install-firmware", label: "ติดตั้ง Firmware", icon: Download },
   { id: "bms-manager", label: "เพิ่มอุปกรณ์", icon: PlusCircle },
-  
+
 ];
 
 function AuthedApp() {
@@ -713,6 +716,12 @@ function AuthedApp() {
 
       {activePage === "dashboard" && <BMSDashboard />}
       {activePage === "admin" && <AdminMonitor />}
+
+      {activePage === "feedback" && (
+        <div className="mx-auto max-w-7xl px-3 py-6 sm:px-5 md:px-7">
+          <EquipmentFeedbackDashboard />
+        </div>
+      )}
 
       {activePage === "bms-manager" && (
         <div className="mx-auto max-w-7xl px-3 py-6 sm:px-5 md:px-7">
