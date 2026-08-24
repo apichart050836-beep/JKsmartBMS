@@ -1,5 +1,6 @@
 import "dotenv/config";
 import express from "express";
+import compression from "compression";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import { createServer } from "node:http";
@@ -26,6 +27,14 @@ startTelemetryLogger();
 startChargeWatchdog();
 
 const app = express();
+
+// gzip/brotli-compresses every response this process sends (JSON API
+// replies, and the static JS/CSS bundle below) - per explicit request to
+// cut Render bandwidth usage. Registered first so nothing downstream can
+// bypass it. Uses compression's default content-type filter, which already
+// skips already-compressed binary payloads (firmware .bin downloads,
+// images) automatically - no extra config needed for that.
+app.use(compression());
 
 // 🎯 ตั้งค่า Multer สำหรับรับไฟล์อัปโหลดไว้ใน Memory ชั่วคราว
 const upload = multer({ storage: multer.memoryStorage() });
@@ -120,8 +129,32 @@ app.use("/api/firmware", createFirmwareRouter(io));
 // deployed process only ever serves bare API responses, no HTML/JS/CSS.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distPath = path.resolve(__dirname, "../dist");
-app.use(express.static(distPath));
+// Vite content-hashes every file under dist/assets/ (index-<hash>.js,
+// vendor-<hash>.js, ...) - a changed file always gets a new URL, so those
+// alone are safe to tell browsers to cache for a full year and never
+// re-validate (immutable). Everything else in dist/ is a verbatim copy of
+// public/ (e.g. images/flow-main.jpg) with a STABLE filename that could
+// be replaced by a future deploy - caching those "immutable" would leave
+// visitors stuck on a year-old stale copy forever if that ever happens,
+// so they get a short, revalidating cache instead. index.html is the
+// other exception: it's the file that actually changes on every deploy
+// (it references that build's current hashed filenames), so it must
+// always be re-fetched/re-validated, never served stale.
+app.use(
+  express.static(distPath, {
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith("index.html")) {
+        res.setHeader("Cache-Control", "no-cache");
+      } else if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      } else {
+        res.setHeader("Cache-Control", "public, max-age=3600");
+      }
+    },
+  })
+);
 app.get(/^\/(?!api\/).*/, (_req, res) => {
+  res.set("Cache-Control", "no-cache");
   res.sendFile(path.join(distPath, "index.html"));
 });
 

@@ -30,6 +30,17 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (id.includes("node_modules")) {
+            // esptool-js is only reachable through the lazy-loaded
+            // ESPFirmwareInstaller.jsx (see App.jsx's React.lazy import) -
+            // forcing it into the shared "vendor" bucket like every other
+            // dependency here would undo that split, since every visitor
+            // downloads vendor.js upfront regardless of which page they
+            // open. Leaving it unassigned lets Rollup's own import-graph
+            // chunking put it in that page's own chunk instead, per
+            // explicit request to cut Render bandwidth for the far more
+            // common case (a regular Dashboard user who never opens the
+            // firmware flashing page).
+            if (id.includes("esptool-js")) return;
             return "vendor";
           }
         },

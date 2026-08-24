@@ -630,7 +630,7 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
                     {/* Background Schematic Image with High-Tech Filter */}
                     <div 
                       className="absolute inset-0 bg-cover bg-center opacity-40 mix-blend-luminosity filter contrast-125 scale-105 transition-transform duration-700"
-                      style={{ backgroundImage: `url('/images/flow-main.jpg')` }}
+                      style={{ backgroundImage: `url('/images/flow-main.webp')` }}
                     ></div>
                     <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/40 to-transparent"></div>
 
