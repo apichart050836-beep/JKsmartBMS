@@ -1,7 +1,8 @@
 import React from "react";
-import { Settings, Sun, Moon, Bell } from "lucide-react";
+import { Settings, Sun, Moon } from "lucide-react";
 import { useTheme } from "../context/ThemeContext.jsx";
 import { WeatherButton } from "./WeatherButton.jsx";
+import { LineIcon } from "./icons/LineIcon.jsx";
 
 /**
  * BmsTabs: Segmented tab bar with smooth active animation & hover feedback -
@@ -89,9 +90,9 @@ export function TopBar({
                     type="button"
                     onClick={onOpenLineNotify}
                     title="แจ้งเตือนผ่าน LINE"
-                    className="group inline-flex size-10 cursor-pointer items-center justify-center rounded-full bg-[var(--card)] text-[var(--muted-foreground)] ring-1 ring-[var(--border)] shadow-sm transition-all duration-200 hover:bg-[var(--muted)] hover:text-[var(--foreground)] hover:scale-105 active:scale-95"
+                    className="group inline-flex size-10 cursor-pointer items-center justify-center rounded-full bg-[#06C755]/10 text-[#06C755] ring-1 ring-[#06C755]/30 shadow-sm transition-all duration-200 hover:bg-[#06C755] hover:text-white hover:scale-105 active:scale-95"
                 >
-                    <Bell className="size-4" />
+                    <LineIcon className="size-4" />
                 </button>
 
                 {/* Configuration Button */}

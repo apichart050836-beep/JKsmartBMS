@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { MessageCircle, Link2Off, ExternalLink } from "lucide-react";
+import { Link2Off } from "lucide-react";
 import { Modal } from "./Modal.jsx";
+import { LineIcon } from "./icons/LineIcon.jsx";
 import { api } from "../lib/apiClient.js";
 
 // Personal LINE push notifications (explicit request) - lets this hub's
@@ -92,8 +93,8 @@ export function LineNotifySettings({ open, onClose }) {
         ) : status.linked ? (
           <div className="flex items-center justify-between rounded-xl bg-[var(--muted)] p-3">
             <div className="flex items-center gap-2">
-              <span className="flex size-8 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600">
-                <MessageCircle className="size-4" />
+              <span className="flex size-8 items-center justify-center rounded-full bg-[#06C755]/10 text-[#06C755]">
+                <LineIcon className="size-4" />
               </span>
               <div>
                 <p className="text-xs font-semibold text-[var(--foreground)]">เชื่อมต่อ LINE แล้ว</p>
@@ -121,7 +122,7 @@ export function LineNotifySettings({ open, onClose }) {
             disabled={busy}
             className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#06C755] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <ExternalLink className="size-4" />
+            <LineIcon className="size-4" />
             {busy ? "กำลังเชื่อมต่อ..." : "เชื่อมต่อบัญชี LINE"}
           </button>
         )}
