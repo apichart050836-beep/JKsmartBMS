@@ -295,6 +295,13 @@ async function checkDevice(hubId, bmsKey, data, lineUserId) {
 // breach. Resets on restart - the first cycle after a deploy only seeds
 // the baseline, never itself fires (nothing to compare against yet).
 const lastNotifiedDecileByHub = new Map();
+// Per explicit follow-up request: if SOC sits still inside the same decile
+// for a long time (e.g. parked at 60% for hours), send one "still at X%"
+// reminder every REMINDER_INTERVAL_MS rather than staying silent forever -
+// tracked separately from the decile-cross timing so a real cross always
+// resets the reminder clock too (no double-notify right after a cross).
+const REMINDER_INTERVAL_MS = 60 * 60 * 1000;
+const lastFleetNotifyAtByHub = new Map();
 async function checkFleetAverage(hubId, devices, lineUserId) {
   let remainingAh = 0;
   let capacityAh = 0;
@@ -311,21 +318,45 @@ async function checkFleetAverage(hubId, devices, lineUserId) {
   const prevDecile = lastNotifiedDecileByHub.get(hubId);
   lastNotifiedDecileByHub.set(hubId, decile);
 
-  if (prevDecile === undefined || decile === prevDecile) return;
-
-  const rising = decile > prevDecile;
-  // Per explicit request: "เป็น" reads naturally for an increase ("...
-  // เพิ่มขึ้น เป็น 50%"), "เหลือ" for a decrease ("...ลดลง เหลือ 50%") - a
-  // single fixed word for both directions read awkwardly in Thai.
-  const direction = rising ? "เพิ่มขึ้น" : "ลดลง";
-  const verb = rising ? "เป็น" : "เหลือ";
   const currentLabel = current > 0 ? `+${current.toFixed(1)}` : current.toFixed(1);
-  const message = `🔋 แบตเฉลี่ยทั้งระบบ${direction} ${verb} ${soc.toFixed(0)}% (${remainingAh.toFixed(1)}/${capacityAh.toFixed(1)}Ah) ${currentLabel} A (${nowTimeLabel()})`;
+  const detail = `(${remainingAh.toFixed(1)}/${capacityAh.toFixed(1)}Ah) ${currentLabel} A (${nowTimeLabel()})`;
+
+  if (prevDecile === undefined) {
+    // First observation ever (or since restart) - just seed both baselines,
+    // never fire on it (nothing to compare against yet).
+    lastFleetNotifyAtByHub.set(hubId, Date.now());
+    return;
+  }
+
+  if (decile !== prevDecile) {
+    const rising = decile > prevDecile;
+    // Per explicit request: "เป็น" reads naturally for an increase ("...
+    // เพิ่มขึ้น เป็น 50%"), "เหลือ" for a decrease ("...ลดลง เหลือ 50%") - a
+    // single fixed word for both directions read awkwardly in Thai.
+    const direction = rising ? "เพิ่มขึ้น" : "ลดลง";
+    const verb = rising ? "เป็น" : "เหลือ";
+    const message = `🔋 แบตเฉลี่ยทั้งระบบ${direction} ${verb} ${soc.toFixed(0)}% ${detail}`;
+    try {
+      await pushLineMessage(lineUserId, message);
+    } catch (err) {
+      console.error(`[LineAlertWatchdog] fleet average push failed for ${hubId}: ${err.message}`);
+    }
+    lastFleetNotifyAtByHub.set(hubId, Date.now());
+    return;
+  }
+
+  // Same decile as last time - only remind once REMINDER_INTERVAL_MS has
+  // passed since the last notification (cross or reminder alike).
+  const lastNotifyAt = lastFleetNotifyAtByHub.get(hubId);
+  if (lastNotifyAt !== undefined && Date.now() - lastNotifyAt < REMINDER_INTERVAL_MS) return;
+
+  const message = `🔋 แบตเฉลี่ยทั้งระบบยังคงอยู่ที่ ${soc.toFixed(0)}% ${detail}`;
   try {
     await pushLineMessage(lineUserId, message);
   } catch (err) {
-    console.error(`[LineAlertWatchdog] fleet average push failed for ${hubId}: ${err.message}`);
+    console.error(`[LineAlertWatchdog] fleet average reminder push failed for ${hubId}: ${err.message}`);
   }
+  lastFleetNotifyAtByHub.set(hubId, Date.now());
 }
 
 async function runCycle() {
