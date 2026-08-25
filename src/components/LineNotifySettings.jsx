@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Link2Off } from "lucide-react";
+import { Link2Off, Send } from "lucide-react";
 import { Modal } from "./Modal.jsx";
 import { LineIcon } from "./icons/LineIcon.jsx";
 import { api } from "../lib/apiClient.js";
@@ -14,6 +14,11 @@ export function LineNotifySettings({ open, onClose }) {
   const [status, setStatus] = useState(null); // { linked, linkedAt } | null while loading
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  // Separate from `busy`/`error` above (connect/unlink) so a test push
+  // doesn't disable/clash with those, and its own result reads as "test
+  // sent" rather than a generic connection error.
+  const [testBusy, setTestBusy] = useState(false);
+  const [testResult, setTestResult] = useState(null); // "ok" | "error" | null
   // Set once, from the URL LINE redirected back to (see routes/line.js's
   // /callback) - "linked" | "error" | null. Read here rather than at the
   // dashboard's top level since this modal is the only place it's ever
@@ -57,6 +62,19 @@ export function LineNotifySettings({ open, onClose }) {
     }
   }
 
+  async function handleTest() {
+    setTestBusy(true);
+    setTestResult(null);
+    try {
+      await api.lineTest();
+      setTestResult("ok");
+    } catch {
+      setTestResult("error");
+    } finally {
+      setTestBusy(false);
+    }
+  }
+
   async function handleUnlink() {
     setBusy(true);
     setError(null);
@@ -85,44 +103,65 @@ export function LineNotifySettings({ open, onClose }) {
         )}
 
         <p className="text-xs text-[var(--muted-foreground)]">
-          รับแจ้งเตือนส่วนตัวผ่าน LINE เมื่อเซลล์แรงดันต่างกันเกิน 50mV, แบตใกล้เต็ม/เต็ม, แบตใกล้หมด/หมด หรือกระแสชาร์จ/ใช้ไฟเกินค่าที่แนะนำ
+          รับแจ้งเตือนส่วนตัวผ่าน LINE เมื่อเซลล์แรงดันต่างกันเกิน 50mV, แบตใกล้เต็ม/เต็ม, แบตใกล้หมด/หมด, กระแสชาร์จ/ใช้ไฟเกินค่าที่แนะนำ
+          หรืออุปกรณ์ขาดการเชื่อมต่อ/เชื่อมต่อกลับมา (พร้อมเวลา)
         </p>
 
         {status === null ? (
           <p className="text-xs text-[var(--muted-foreground)]">กำลังโหลด...</p>
         ) : status.linked ? (
-          <div className="flex items-center justify-between rounded-xl bg-[var(--muted)] p-3">
-            <div className="flex items-center gap-2">
-              <span className="flex size-8 items-center justify-center rounded-full bg-[#06C755]/10 text-[#06C755]">
-                <LineIcon className="size-4" />
-              </span>
-              <div>
-                <p className="text-xs font-semibold text-[var(--foreground)]">เชื่อมต่อ LINE แล้ว</p>
-                {status.linkedAt && (
-                  <p className="text-[10px] text-[var(--muted-foreground)]">
-                    ตั้งแต่ {new Date(status.linkedAt).toLocaleString("th-TH")}
-                  </p>
-                )}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between rounded-xl bg-[var(--muted)] p-3">
+              <div className="flex items-center gap-2">
+                <LineIcon className="size-8" />
+                <div>
+                  <p className="text-xs font-semibold text-[var(--foreground)]">เชื่อมต่อ LINE แล้ว</p>
+                  {status.linkedAt && (
+                    <p className="text-[10px] text-[var(--muted-foreground)]">
+                      ตั้งแต่ {new Date(status.linkedAt).toLocaleString("th-TH")}
+                    </p>
+                  )}
+                </div>
               </div>
+              <button
+                type="button"
+                onClick={handleUnlink}
+                disabled={busy}
+                className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-[var(--critical)] hover:bg-[var(--critical-10)] disabled:opacity-50"
+              >
+                <Link2Off className="size-3.5" />
+                ยกเลิก
+              </button>
             </div>
+
             <button
               type="button"
-              onClick={handleUnlink}
-              disabled={busy}
-              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-[var(--critical)] hover:bg-[var(--critical-10)] disabled:opacity-50"
+              onClick={handleTest}
+              disabled={testBusy}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-[#06C755] px-4 py-2 text-xs font-semibold text-[#06C755] transition-all hover:bg-[#06C755]/10 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <Link2Off className="size-3.5" />
-              ยกเลิก
+              <Send className="size-3.5" />
+              {testBusy ? "กำลังส่ง..." : "ทดสอบแจ้งเตือน"}
             </button>
+            {testResult === "ok" && (
+              <p className="text-center text-[11px] font-semibold text-emerald-600">
+                ส่งข้อความทดสอบแล้ว ตรวจสอบแอป LINE ของคุณ
+              </p>
+            )}
+            {testResult === "error" && (
+              <p className="text-center text-[11px] font-semibold text-[var(--critical)]">
+                ส่งไม่สำเร็จ - ตรวจสอบว่าได้เพิ่มบัญชี LINE ทางการเป็นเพื่อนแล้ว
+              </p>
+            )}
           </div>
         ) : (
           <button
             type="button"
             onClick={handleConnect}
             disabled={busy}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#06C755] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-xl border-2 border-[#06C755] bg-[var(--card)] px-4 py-2.5 text-sm font-semibold text-[#06C755] shadow-sm transition-all hover:bg-[#06C755]/10 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <LineIcon className="size-4" />
+            <LineIcon className="size-5" />
             {busy ? "กำลังเชื่อมต่อ..." : "เชื่อมต่อบัญชี LINE"}
           </button>
         )}

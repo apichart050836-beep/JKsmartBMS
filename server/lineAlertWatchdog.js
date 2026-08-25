@@ -21,6 +21,28 @@ function deviceLabel(hubId, bmsKey, settings) {
   return settings?.my_custom_name || (bmsKey ? `${hubId}/${bmsKey}` : hubId);
 }
 
+function nowTimeLabel() {
+  return new Date().toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+// Same "uptime_seconds hasn't moved since the last check" staleness check
+// chargeWatchdog.js already uses - a live device's own seconds-since-boot
+// counter only ever climbs, so an unchanged reading between two polls means
+// the last Firebase write is frozen (BLE/WiFi dropped), not a fresh one.
+// In-memory, resets on restart - the very first poll after a deploy has no
+// prior value to compare against, so it can never itself report "just went
+// offline" (or "just came back") - same accepted tradeoff as
+// chargeWatchdog.js's own copy of this pattern.
+const lastUptimeByDevice = new Map();
+function isDeviceStale(hubId, bmsKey, status) {
+  const key = bmsKey ? `${hubId}/${bmsKey}` : hubId;
+  const uptime = status.uptime_seconds;
+  const prevUptime = lastUptimeByDevice.get(key);
+  if (typeof uptime === "number") lastUptimeByDevice.set(key, uptime);
+  if (typeof uptime !== "number" || typeof prevUptime !== "number") return false;
+  return uptime <= prevUptime;
+}
+
 // Each condition: `id` (for line_alert_state's PK + dedup), `check(status,
 // settings)` returning true/false for "currently breached", and
 // `message(status, settings, label)` building the Thai push text only
@@ -142,10 +164,41 @@ function setAlertState(hubId, bmsKey, conditionId, active) {
   ).run(hubId, bmsKey, conditionId, active, Date.now());
 }
 
+const OFFLINE_CONDITION_ID = "device_offline";
+
 async function checkDevice(hubId, bmsKey, data, lineUserId) {
   const { status, settings } = data;
   const bmsKeyNorm = bmsKey ?? "";
   const label = deviceLabel(hubId, bmsKey, settings);
+
+  // Offline/reconnect, per explicit request (with the time included) -
+  // checked and edge-triggered the same way as every other condition
+  // below, just driven by the uptime-staleness check instead of a
+  // threshold. While a device is offline its last-known status/settings
+  // are frozen, not live, so the other conditions are skipped entirely for
+  // this cycle rather than potentially re-alerting on stale numbers.
+  const stale = isDeviceStale(hubId, bmsKey, status);
+  const offlineRow = getAlertState(hubId, bmsKeyNorm, OFFLINE_CONDITION_ID);
+  const wasOffline = offlineRow ? !!offlineRow.active : false;
+  if (stale && !wasOffline) {
+    try {
+      await pushLineMessage(lineUserId, `📡 ${label}\nอุปกรณ์ขาดการเชื่อมต่อ (${nowTimeLabel()})`);
+    } catch (err) {
+      console.error(`[LineAlertWatchdog] push failed for ${label}/${OFFLINE_CONDITION_ID}: ${err.message}`);
+    }
+    setAlertState(hubId, bmsKeyNorm, OFFLINE_CONDITION_ID, 1);
+    return;
+  }
+  if (!stale && wasOffline) {
+    try {
+      await pushLineMessage(lineUserId, `📡 ${label}\nอุปกรณ์เชื่อมต่อกลับมาแล้ว (${nowTimeLabel()})`);
+    } catch (err) {
+      console.error(`[LineAlertWatchdog] push failed for ${label}/reconnect: ${err.message}`);
+    }
+    setAlertState(hubId, bmsKeyNorm, OFFLINE_CONDITION_ID, 0);
+  } else if (stale) {
+    return; // still offline, already notified - skip the rest while data is frozen
+  }
 
   for (const condition of CONDITIONS) {
     let isBreached;

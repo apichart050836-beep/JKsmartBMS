@@ -2,6 +2,7 @@ import { Router } from "express";
 import { requireAuth } from "../middleware/requireAuth.js";
 import { db } from "../db.js";
 import { isLineLoginConfigured, signLinkState, verifyLinkState, buildLoginUrl, exchangeCodeForLineUserId } from "../lineAuth.js";
+import { pushLineMessage } from "../lineNotify.js";
 
 const router = Router();
 
@@ -65,6 +66,24 @@ router.get("/callback", async (req, res) => {
   } catch (err) {
     console.error(`LINE link callback failed for hub ${hubId}: ${err.message}`);
     res.redirect(frontendReturnUrl({ line: "error" }));
+  }
+});
+
+// Lets the user confirm the whole chain (link + LINE friend-add + push
+// delivery) actually works, per explicit request, instead of waiting for a
+// real battery condition to happen to find out.
+router.post("/test", requireAuth, async (req, res) => {
+  const hubId = requireOwnHub(req, res);
+  if (!hubId) return;
+  const row = db.prepare(`SELECT line_user_id FROM line_links WHERE hub_id = ?`).get(hubId);
+  if (!row) return res.status(400).json({ error: "ยังไม่ได้เชื่อมต่อบัญชี LINE" });
+  try {
+    const time = new Date().toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    await pushLineMessage(row.line_user_id, `🔔 นี่คือข้อความทดสอบจาก JK BMS Dashboard (${time})`);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(`LINE test push failed for hub ${hubId}: ${err.message}`);
+    res.status(502).json({ error: err.message || "ส่งข้อความทดสอบไม่สำเร็จ" });
   }
 });
 

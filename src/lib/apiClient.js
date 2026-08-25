@@ -109,6 +109,7 @@ export const api = {
   // consent screen can't be shown inside a fetch.
   lineStatus: () => request("/api/line/status"),
   lineLoginUrl: () => request("/api/line/login-url"),
+  lineTest: () => request("/api/line/test", { method: "POST" }),
   lineUnlink: () => request("/api/line/unlink", { method: "DELETE" }),
 };
 

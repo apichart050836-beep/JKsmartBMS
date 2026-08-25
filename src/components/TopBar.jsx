@@ -85,14 +85,17 @@ export function TopBar({
                     Configuration instead, see SettingsPanel.jsx). */}
                 <WeatherButton onClick={onOpenWeather} />
 
-                {/* LINE Notifications Button */}
+                {/* LINE Notifications Button - the icon is already a
+                    self-contained green circular badge, so this button is
+                    just a transparent hit-target/hover-scale wrapper, not
+                    another colored circle around it. */}
                 <button
                     type="button"
                     onClick={onOpenLineNotify}
                     title="แจ้งเตือนผ่าน LINE"
-                    className="group inline-flex size-10 cursor-pointer items-center justify-center rounded-full bg-[#06C755]/10 text-[#06C755] ring-1 ring-[#06C755]/30 shadow-sm transition-all duration-200 hover:bg-[#06C755] hover:text-white hover:scale-105 active:scale-95"
+                    className="group inline-flex size-10 cursor-pointer items-center justify-center rounded-full shadow-sm ring-1 ring-[var(--border)] transition-all duration-200 hover:scale-105 active:scale-95"
                 >
-                    <LineIcon className="size-4" />
+                    <LineIcon className="size-7" />
                 </button>
 
                 {/* Configuration Button */}
