@@ -100,7 +100,7 @@ const CONDITIONS = [
       return soc >= 90 && soc < 100;
     },
     message(status, settings, label) {
-      return `🔋 ${label}\nแบตใกล้เต็มแล้ว (${(status.percent_remain ?? 0).toFixed(0)}%)`;
+      return `🔋 ${label}\nแบตใกล้เต็มแล้ว (${(status.percent_remain ?? 0).toFixed(0)}%, ${(status.battery_voltage ?? 0).toFixed(2)}V)`;
     },
   },
   {
@@ -109,7 +109,7 @@ const CONDITIONS = [
       return (status.percent_remain ?? 0) >= 100;
     },
     message(status, settings, label) {
-      return `🔋 ${label}\nแบตชาร์จเต็ม 100% แล้ว`;
+      return `🔋 ${label}\nแบตชาร์จเต็ม 100% แล้ว (${(status.battery_voltage ?? 0).toFixed(2)}V)`;
     },
   },
   {
@@ -119,7 +119,7 @@ const CONDITIONS = [
       return soc <= 25 && soc > 10;
     },
     message(status, settings, label) {
-      return `🪫 ${label}\nแบตใกล้หมดแล้ว (${(status.percent_remain ?? 0).toFixed(0)}%)`;
+      return `🪫 ${label}\nแบตใกล้หมดแล้ว (${(status.percent_remain ?? 0).toFixed(0)}%, ${(status.battery_voltage ?? 0).toFixed(2)}V)`;
     },
   },
   {
@@ -128,8 +128,13 @@ const CONDITIONS = [
       return (status.percent_remain ?? 100) <= 10;
     },
     message(status, settings, label) {
-      return `🪫 ${label}\nแบตเหลือน้อยมาก (${(status.percent_remain ?? 0).toFixed(0)}%) กรุณาชาร์จโดยเร็ว`;
+      return `🪫 ${label}\nแบตเหลือน้อยมาก (${(status.percent_remain ?? 0).toFixed(0)}%, ${(status.battery_voltage ?? 0).toFixed(2)}V) กรุณาชาร์จโดยเร็ว`;
     },
+    // Per explicit request: unlike the other CONDITIONS (notify once on
+    // breach, silent until recovery), a critically-low battery that just
+    // sits there un-charged should keep reminding - once, then again every
+    // repeatMs while still breached, not just on the initial edge.
+    repeatMs: 60 * 60 * 1000,
   },
   {
     id: "charge_over_recommended",
@@ -185,7 +190,9 @@ const CONDITIONS = [
 // queries) - this module is imported before db.js's migrate() has
 // necessarily run, and line_alert_state wouldn't exist yet.
 function getAlertState(hubId, bmsKey, conditionId) {
-  return db.prepare(`SELECT active FROM line_alert_state WHERE hub_id = ? AND bms_key = ? AND condition_id = ?`).get(hubId, bmsKey, conditionId);
+  return db
+    .prepare(`SELECT active, updated_at FROM line_alert_state WHERE hub_id = ? AND bms_key = ? AND condition_id = ?`)
+    .get(hubId, bmsKey, conditionId);
 }
 function setAlertState(hubId, bmsKey, conditionId, active) {
   db.prepare(
@@ -195,10 +202,6 @@ function setAlertState(hubId, bmsKey, conditionId, active) {
 }
 
 const OFFLINE_CONDITION_ID = "device_offline";
-const BALANCER_CONDITION_ID = "balancer_active";
-// Same raw-field precedence useBmsPackLive.js's frontend "Bal Current"
-// reading already uses (pick(status, "balancing_current", "balance_curr")).
-const BALANCER_EPSILON_A = 0.01; // ignores float noise sitting right at 0, not a real "is it balancing" threshold
 
 async function checkDevice(hubId, bmsKey, data, lineUserId) {
   const { status, settings } = data;
@@ -234,30 +237,6 @@ async function checkDevice(hubId, bmsKey, data, lineUserId) {
     return; // still offline, already notified - skip the rest while data is frozen
   }
 
-  // Balancer start/stop, per explicit request - both directions notify
-  // (unlike the threshold CONDITIONS below, which only alert on breach and
-  // silently reset on recovery), same dual-message shape as offline/
-  // reconnect above.
-  const balancerCurrent = status.balancing_current ?? status.balance_curr ?? 0;
-  const isBalancing = balancerCurrent > BALANCER_EPSILON_A;
-  const balRow = getAlertState(hubId, bmsKeyNorm, BALANCER_CONDITION_ID);
-  const wasBalancing = balRow ? !!balRow.active : false;
-  if (isBalancing && !wasBalancing) {
-    try {
-      await pushLineMessage(lineUserId, `🔄 ${label}\nBalancer เริ่มทำงาน (${balancerCurrent.toFixed(2)}A) (${nowTimeLabel()})`);
-    } catch (err) {
-      console.error(`[LineAlertWatchdog] push failed for ${label}/${BALANCER_CONDITION_ID}: ${err.message}`);
-    }
-    setAlertState(hubId, bmsKeyNorm, BALANCER_CONDITION_ID, 1);
-  } else if (!isBalancing && wasBalancing) {
-    try {
-      await pushLineMessage(lineUserId, `🔄 ${label}\nBalancer หยุดทำงาน (${nowTimeLabel()})`);
-    } catch (err) {
-      console.error(`[LineAlertWatchdog] push failed for ${label}/balancer-stop: ${err.message}`);
-    }
-    setAlertState(hubId, bmsKeyNorm, BALANCER_CONDITION_ID, 0);
-  }
-
   for (const condition of CONDITIONS) {
     let isBreached;
     try {
@@ -276,6 +255,21 @@ async function checkDevice(hubId, bmsKey, data, lineUserId) {
         console.error(`[LineAlertWatchdog] push failed for ${label}/${condition.id}: ${err.message}`);
       }
       setAlertState(hubId, bmsKeyNorm, condition.id, 1);
+    } else if (isBreached && wasActive && condition.repeatMs) {
+      // Still breached, and this condition wants periodic reminders (per
+      // explicit request for soc_low_10 - a critically-low battery left
+      // un-charged for hours shouldn't go silent after the first notice).
+      // updated_at doubles as "last notified at" here since setAlertState
+      // is the only writer and always stamps it fresh.
+      const lastNotifiedAt = row.updated_at ?? 0;
+      if (Date.now() - lastNotifiedAt >= condition.repeatMs) {
+        try {
+          await pushLineMessage(lineUserId, condition.message(status, settings, label));
+        } catch (err) {
+          console.error(`[LineAlertWatchdog] repeat push failed for ${label}/${condition.id}: ${err.message}`);
+        }
+        setAlertState(hubId, bmsKeyNorm, condition.id, 1);
+      }
     } else if (!isBreached && wasActive) {
       // Recovered - reset so the next real breach can notify again.
       setAlertState(hubId, bmsKeyNorm, condition.id, 0);
