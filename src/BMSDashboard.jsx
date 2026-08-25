@@ -7,6 +7,7 @@ import { useHubData } from "./context/HubDataContext.jsx";
 import { useWeatherLocation } from "./hooks/useWeatherLocation.js";
 import { InstallationLocationModal } from "./components/InstallationLocationModal.jsx";
 import { WeatherModal } from "./components/WeatherModal.jsx";
+import { LineNotifySettings } from "./components/LineNotifySettings.jsx";
 import { DetailedLog } from "./components/DetailedLog.jsx";
 import { SystemHero } from "./components/SystemHero.jsx";
 import { PowerFlowChart } from "./components/PowerFlowChart.jsx";
@@ -202,6 +203,13 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
   const { hubs } = useHubData();
   const [now, setNow] = useState(new Date());
   const [showWeatherModal, setShowWeatherModal] = useState(false);
+  // Auto-opens if the page just loaded from LINE's OAuth redirect (see
+  // routes/line.js's /callback -> ?line=linked|error) - otherwise the user
+  // would land back on the dashboard with no visible sign anything
+  // happened at all.
+  const [showLineNotifyModal, setShowLineNotifyModal] = useState(
+    () => new URLSearchParams(window.location.search).has("line")
+  );
   const [activeBmsId, setActiveBmsId] = useState(() => {
     try {
       return localStorage.getItem(ACTIVE_BMS_STORAGE_KEY) || "bms-slot-0";
@@ -572,6 +580,7 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
                 weatherLoc.openWeather();
               }}
               onOpenConfig={() => setShowConfig(true)}
+              onOpenLineNotify={() => setShowLineNotifyModal(true)}
               configDisabled={active.isLive && active.adminDisabled}
               onLogout={() => setIsLogoutModalOpen(true)}
             />
@@ -1105,6 +1114,8 @@ const loadConsumptionPower = totalPower < 0 ? Math.abs(totalPower) : 0;
                 weatherLoc.setShowSetupModal(true);
               }}
             />
+
+            <LineNotifySettings open={showLineNotifyModal} onClose={() => setShowLineNotifyModal(false)} />
 
             <Modal open={showOfflineModal} onClose={() => setOfflineDismissed(true)} title="อุปกรณ์หลุดการเชื่อมต่อ">
               <div className="flex flex-col items-center gap-2 py-3 text-center">

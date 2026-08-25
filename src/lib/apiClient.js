@@ -103,6 +103,13 @@ export const api = {
     request(`/api/admin/pending-signups/${encodeURIComponent(email)}/approve`, { method: "POST" }),
   rejectPendingSignup: (email) =>
     request(`/api/admin/pending-signups/${encodeURIComponent(email)}`, { method: "DELETE" }),
+  // Personal LINE push notifications (server/routes/line.js) - see
+  // LineNotifySettings.jsx. loginUrl() returns the LINE OAuth URL to
+  // navigate the whole page to (real redirect, not a fetch) - LINE's
+  // consent screen can't be shown inside a fetch.
+  lineStatus: () => request("/api/line/status"),
+  lineLoginUrl: () => request("/api/line/login-url"),
+  lineUnlink: () => request("/api/line/unlink", { method: "DELETE" }),
 };
 
 export const API_BASE_URL = API_BASE;

@@ -15,16 +15,19 @@ import authRoutes from "./routes/auth.js";
 import hubsRoutes from "./routes/hubs.js";
 import adminRoutes from "./routes/admin.js";
 import historyRoutes from "./routes/history.js";
+import lineRoutes from "./routes/line.js";
 import { createAnnouncementsRouter } from "./routes/announcements.js";
 import { createFirmwareRouter } from "./routes/firmware.js";
 import { attachRealtime } from "./realtime.js";
 import { startTelemetryLogger } from "./telemetryLogger.js";
 import { startChargeWatchdog } from "./chargeWatchdog.js";
+import { startLineAlertWatchdog } from "./lineAlertWatchdog.js";
 import { isAllowedOrigin } from "./corsOrigin.js";
 
 migrate();
 startTelemetryLogger();
 startChargeWatchdog();
+startLineAlertWatchdog();
 
 const app = express();
 
@@ -64,6 +67,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/hubs", hubsRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/hubs", historyRoutes);
+app.use("/api/line", lineRoutes);
 
 // =========================================================
 // 🚀 Route สำหรับเป็น Proxy ส่ง Firmware ไปยัง ESPHome (Direct/LAN)

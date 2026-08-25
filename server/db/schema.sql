@@ -128,3 +128,31 @@ CREATE TABLE IF NOT EXISTS pending_signups (
   email        TEXT PRIMARY KEY,
   requested_at INTEGER NOT NULL
 );
+
+-- Personal LINE push notifications (explicit request) - one row per hub
+-- (a 'user' session owns exactly one hub, see hubAccess.js), linking it to
+-- the LINE userId obtained via LINE Login OAuth (server/lineAuth.js). This
+-- is what lineAlertWatchdog.js reads to know who to push to; a hub with no
+-- row here just never gets checked/notified.
+CREATE TABLE IF NOT EXISTS line_links (
+  hub_id      TEXT PRIMARY KEY,
+  line_user_id TEXT NOT NULL,
+  linked_at   INTEGER NOT NULL
+);
+
+-- Edge-trigger state for each (hub, device, condition) the watchdog
+-- checks (cell imbalance, SOC thresholds, charge/discharge current
+-- thresholds - see lineAlertWatchdog.js's CONDITIONS list). `active=1`
+-- means "already notified for this ongoing breach" - the watchdog only
+-- pushes a message on the 0->1 transition, so a condition that stays
+-- breached for hours doesn't spam a message every poll. It resets back to
+-- 0 (and can fire again) once the underlying reading recovers below the
+-- threshold.
+CREATE TABLE IF NOT EXISTS line_alert_state (
+  hub_id       TEXT NOT NULL,
+  bms_key      TEXT NOT NULL DEFAULT '',
+  condition_id TEXT NOT NULL,
+  active       INTEGER NOT NULL,
+  updated_at   INTEGER NOT NULL,
+  PRIMARY KEY (hub_id, bms_key, condition_id)
+);
