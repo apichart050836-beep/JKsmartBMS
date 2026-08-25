@@ -183,6 +183,10 @@ function setAlertState(hubId, bmsKey, conditionId, active) {
 }
 
 const OFFLINE_CONDITION_ID = "device_offline";
+const BALANCER_CONDITION_ID = "balancer_active";
+// Same raw-field precedence useBmsPackLive.js's frontend "Bal Current"
+// reading already uses (pick(status, "balancing_current", "balance_curr")).
+const BALANCER_EPSILON_A = 0.01; // ignores float noise sitting right at 0, not a real "is it balancing" threshold
 
 async function checkDevice(hubId, bmsKey, data, lineUserId) {
   const { status, settings } = data;
@@ -216,6 +220,30 @@ async function checkDevice(hubId, bmsKey, data, lineUserId) {
     setAlertState(hubId, bmsKeyNorm, OFFLINE_CONDITION_ID, 0);
   } else if (stale) {
     return; // still offline, already notified - skip the rest while data is frozen
+  }
+
+  // Balancer start/stop, per explicit request - both directions notify
+  // (unlike the threshold CONDITIONS below, which only alert on breach and
+  // silently reset on recovery), same dual-message shape as offline/
+  // reconnect above.
+  const balancerCurrent = status.balancing_current ?? status.balance_curr ?? 0;
+  const isBalancing = balancerCurrent > BALANCER_EPSILON_A;
+  const balRow = getAlertState(hubId, bmsKeyNorm, BALANCER_CONDITION_ID);
+  const wasBalancing = balRow ? !!balRow.active : false;
+  if (isBalancing && !wasBalancing) {
+    try {
+      await pushLineMessage(lineUserId, `🔄 ${label}\nBalancer เริ่มทำงาน (${balancerCurrent.toFixed(2)}A) (${nowTimeLabel()})`);
+    } catch (err) {
+      console.error(`[LineAlertWatchdog] push failed for ${label}/${BALANCER_CONDITION_ID}: ${err.message}`);
+    }
+    setAlertState(hubId, bmsKeyNorm, BALANCER_CONDITION_ID, 1);
+  } else if (!isBalancing && wasBalancing) {
+    try {
+      await pushLineMessage(lineUserId, `🔄 ${label}\nBalancer หยุดทำงาน (${nowTimeLabel()})`);
+    } catch (err) {
+      console.error(`[LineAlertWatchdog] push failed for ${label}/balancer-stop: ${err.message}`);
+    }
+    setAlertState(hubId, bmsKeyNorm, BALANCER_CONDITION_ID, 0);
   }
 
   for (const condition of CONDITIONS) {
@@ -273,9 +301,14 @@ async function checkFleetAverage(hubId, devices, lineUserId) {
 
   if (prevDecile === undefined || decile === prevDecile) return;
 
-  const direction = decile > prevDecile ? "เพิ่มขึ้น" : "ลดลง";
+  const rising = decile > prevDecile;
+  // Per explicit request: "เป็น" reads naturally for an increase ("...
+  // เพิ่มขึ้น เป็น 50%"), "เหลือ" for a decrease ("...ลดลง เหลือ 50%") - a
+  // single fixed word for both directions read awkwardly in Thai.
+  const direction = rising ? "เพิ่มขึ้น" : "ลดลง";
+  const verb = rising ? "เป็น" : "เหลือ";
   const currentLabel = current > 0 ? `+${current.toFixed(1)}` : current.toFixed(1);
-  const message = `🔋 แบตเฉลี่ยทั้งระบบ${direction} เหลือ ${soc.toFixed(0)}% (${remainingAh.toFixed(1)}/${capacityAh.toFixed(1)}Ah) ${currentLabel} A (${nowTimeLabel()})`;
+  const message = `🔋 แบตเฉลี่ยทั้งระบบ${direction} ${verb} ${soc.toFixed(0)}% (${remainingAh.toFixed(1)}/${capacityAh.toFixed(1)}Ah) ${currentLabel} A (${nowTimeLabel()})`;
   try {
     await pushLineMessage(lineUserId, message);
   } catch (err) {

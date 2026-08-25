@@ -27,6 +27,9 @@ export function useBmsPackLive(config) {
   const [powerHistory, setPowerHistory] = useState([]);
   const [lastUpdateAt, setLastUpdateAt] = useState(null);
   const lastStatusJsonRef = useRef(null);
+  const lastChargeCurrentRef = useRef(undefined);
+  const lastCapacityRemainRef = useRef(undefined);
+  const lastBatteryVoltageRef = useRef(undefined);
 
   // Pulls this specific device's node out of the hub tree the socket has
   // already delivered - null until that hub has actually arrived (or this
@@ -45,16 +48,20 @@ export function useBmsPackLive(config) {
   const adminDisabled = !adminEnabled;
   const connected = !!raw && adminEnabled;
 
-  // lastUpdateAt (used for the Online/Offline check) advances whenever
-  // EITHER info.uptime_seconds has increased OR any field in status has
-  // changed, per explicit instruction - checked independently, not one as
-  // a fallback for the other, so a device proves itself live via whichever
-  // signal actually moves. A live device's own seconds-since-boot counter
-  // only ever climbs, so that alone is already a direct, unambiguous "this
-  // is a fresh reading" signal; the whole-status diff catches everything
-  // else (current, voltages, temps, ...) in case a specific device's
-  // uptime_seconds reporting is ever flaky while the rest of its telemetry
-  // keeps moving. Confirmed live (2026-07-27, BLE physically unplugged)
+  // lastUpdateAt (used for the Online/Offline check) advances whenever ANY
+  // of these move: info.uptime_seconds increased, the whole status object
+  // changed, charge_current changed, capacity_remain changed, or
+  // battery_voltage changed - checked independently, not one as a fallback
+  // for another, so a device proves itself live via whichever signal
+  // actually moves. A live device's own seconds-since-boot counter only
+  // ever climbs, so that alone is already a direct, unambiguous "this is a
+  // fresh reading" signal; the whole-status diff catches everything else
+  // (cell voltages, temps, ...) in case a specific device's uptime_seconds
+  // reporting is ever flaky; the explicit charge_current/capacity_remain/
+  // battery_voltage checks (per explicit request) are narrower call-outs
+  // of the real telemetry values that should be moving almost every real
+  // poll, on top of the whole-status diff rather than instead of it.
+  // Confirmed live (2026-07-27, BLE physically unplugged)
   // that jkbms-bridge.yaml stops writing to Firebase entirely when the BLE
   // link drops rather than re-pushing a heartbeat, so both signals really
   // do freeze the moment the link dies, and our own 5s backend poll would
@@ -74,7 +81,31 @@ export function useBmsPackLive(config) {
     const statusChanged = lastStatusJsonRef.current !== statusJson;
     lastStatusJsonRef.current = statusJson;
 
-    const isFresh = uptimeIncreased || statusChanged;
+    // Extra explicit checks on the fields that should move on nearly every
+    // real poll (per explicit request, tried alongside the whole-status
+    // diff above rather than replacing it) - charge_current is the live
+    // current reading, capacity_remain is the BMS's own running coulomb
+    // counter, and battery_voltage is the live pack voltage reading, all
+    // real, continuously-updating values straight from the device rather
+    // than something derived. Logically redundant with statusChanged
+    // whenever these are what's actually moving (a change to any one of
+    // them already changes the whole-object JSON too), but doesn't hurt to
+    // check explicitly, and narrows freshness to specific real telemetry
+    // values instead of "did literally anything in status differ" for
+    // anyone debugging this later.
+    const chargeCurrentNow = pick(status, "current", "charge_current");
+    const chargeCurrentChanged = chargeCurrentNow !== lastChargeCurrentRef.current;
+    lastChargeCurrentRef.current = chargeCurrentNow;
+
+    const capacityRemainNow = status.capacity_remain;
+    const capacityRemainChanged = capacityRemainNow !== lastCapacityRemainRef.current;
+    lastCapacityRemainRef.current = capacityRemainNow;
+
+    const batteryVoltageNow = status.battery_voltage;
+    const batteryVoltageChanged = batteryVoltageNow !== lastBatteryVoltageRef.current;
+    lastBatteryVoltageRef.current = batteryVoltageNow;
+
+    const isFresh = uptimeIncreased || statusChanged || chargeCurrentChanged || capacityRemainChanged || batteryVoltageChanged;
     if (!isFresh) return;
 
     setLastUpdateAt(Date.now());

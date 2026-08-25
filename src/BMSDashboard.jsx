@@ -311,7 +311,16 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
   // the threshold-breach alarms, per explicit request to surface every
   // abnormal status in one place - was previously only visible via the
   // separate offline modal.
-  const STALE_AFTER_MS = 15000;
+  // Confirmed (per explicit report) that real devices go up to ~20s
+  // between genuine status changes even while perfectly online - the old
+  // 15000ms threshold was tighter than that real-world gap, so a
+  // completely healthy device would flash "offline" every time it hit one
+  // of those slightly-longer-than-15s quiet stretches. Set to exactly that
+  // confirmed ~20s ceiling per explicit request, now that
+  // useBmsPackLive.js's freshness check also watches charge_current/
+  // capacity_remain explicitly (not just the whole-status diff), giving
+  // more chances to catch a real update within this same window.
+  const STALE_AFTER_MS = 20000;
   const isOnline = active.isLive
     ? !!active.firebaseConnected && !!active.lastUpdateAt && (now.getTime() - active.lastUpdateAt < STALE_AFTER_MS)
     : false;
