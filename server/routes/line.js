@@ -1,10 +1,44 @@
 import { Router } from "express";
 import { requireAuth } from "../middleware/requireAuth.js";
+import { requireFirebase } from "../middleware/requireFirebase.js";
 import { db } from "../db.js";
+import { readPath, writePath } from "../firebaseRead.js";
 import { isLineLoginConfigured, signLinkState, verifyLinkState, buildLoginUrl, exchangeCodeForLineUserId } from "../lineAuth.js";
 import { pushLineMessage } from "../lineNotify.js";
 
 const router = Router();
+
+// The LINE link itself now lives in Firebase, NOT the local SQLite db
+// (unlike line_alert_state, which stays there) - per explicit report: every
+// git push triggers a Render redeploy, and Render's free tier disk is
+// ephemeral (re-cloned fresh on every deploy, same reason gitStorage.js
+// exists for firmware files - see its own comment), so a SQLite-only link
+// was getting silently wiped on every single deploy, forcing a full
+// LINE-reconnect each time. Firebase is this app's one genuinely durable
+// store, already used the same way for other per-hub account data
+// (location, admin.enabled) - stored as JK_BMS_HUB/{hubId}/line_link, a
+// sibling of the BMS device keys (same placement location already uses),
+// so isBmsDevice()'s {status,settings} shape check safely ignores it
+// everywhere device-discovery walks the hub tree.
+function lineLinkPath(hubId) {
+  return `JK_BMS_HUB/${hubId}/line_link`;
+}
+
+// Strict 1-account-to-1-LINE in BOTH directions (per explicit request) - a
+// real LINE account must never end up receiving another hub's BMS alerts.
+// Scans the whole hub tree for any OTHER hub whose line_link.lineUserId
+// matches, same cost class as chargeWatchdog.js's own whole-tree read, but
+// only run once per actual link event (not every poll cycle).
+async function detachOtherHubsLinkedTo(lineUserId, exceptHubId) {
+  const hubs = await readPath("JK_BMS_HUB");
+  if (!hubs || typeof hubs !== "object") return;
+  for (const [otherHubId, hubData] of Object.entries(hubs)) {
+    if (otherHubId === exceptHubId) continue;
+    if (hubData?.line_link?.lineUserId === lineUserId) {
+      await writePath(lineLinkPath(otherHubId), null);
+    }
+  }
+}
 
 // Where /callback sends the browser back to once linking succeeds/fails -
 // CLIENT_ORIGIN in local dev (separate Vite port from this backend), a
@@ -27,11 +61,16 @@ function requireOwnHub(req, res) {
   return req.user.hubId;
 }
 
-router.get("/status", requireAuth, (req, res) => {
+router.get("/status", requireAuth, async (req, res) => {
   const hubId = requireOwnHub(req, res);
   if (!hubId) return;
-  const row = db.prepare(`SELECT linked_at FROM line_links WHERE hub_id = ?`).get(hubId);
-  res.json({ linked: !!row, linkedAt: row?.linked_at ?? null });
+  try {
+    const link = await readPath(lineLinkPath(hubId));
+    res.json({ linked: !!link, linkedAt: link?.linkedAt ?? null });
+  } catch (err) {
+    console.error(`GET /api/line/status failed for hub ${hubId}: ${err.message}`);
+    res.status(503).json({ error: "Could not read LINE link status" });
+  }
 });
 
 router.get("/login-url", requireAuth, (req, res) => {
@@ -58,20 +97,11 @@ router.get("/callback", async (req, res) => {
 
   try {
     const lineUserId = await exchangeCodeForLineUserId(code);
-    // Strict 1-account-to-1-LINE in BOTH directions, per explicit request -
-    // a real LINE account must never end up receiving another hub's BMS
-    // alerts. hub_id is already unique (PRIMARY KEY), but line_user_id had
-    // no such guarantee - if the same LINE account were ever linked to a
-    // second hub (e.g. the same person testing under two different demo
-    // accounts), both hubs' alerts would land in that one LINE account.
     // Detaching any other hub's link to this exact lineUserId first makes
     // linking here effectively a MOVE, not an ADD - only the most recent
     // hub this LINE account was linked to ever receives its alerts.
-    db.prepare(`DELETE FROM line_links WHERE line_user_id = ? AND hub_id != ?`).run(lineUserId, hubId);
-    db.prepare(
-      `INSERT INTO line_links (hub_id, line_user_id, linked_at) VALUES (?, ?, ?)
-       ON CONFLICT (hub_id) DO UPDATE SET line_user_id = excluded.line_user_id, linked_at = excluded.linked_at`
-    ).run(hubId, lineUserId, Date.now());
+    await detachOtherHubsLinkedTo(lineUserId, hubId);
+    await writePath(lineLinkPath(hubId), { lineUserId, linkedAt: Date.now() });
     res.redirect(frontendReturnUrl({ line: "linked" }));
   } catch (err) {
     console.error(`LINE link callback failed for hub ${hubId}: ${err.message}`);
@@ -85,13 +115,13 @@ router.get("/callback", async (req, res) => {
 router.post("/test", requireAuth, async (req, res) => {
   const hubId = requireOwnHub(req, res);
   if (!hubId) return;
-  const row = db.prepare(`SELECT line_user_id FROM line_links WHERE hub_id = ?`).get(hubId);
-  if (!row) return res.status(400).json({ error: "ยังไม่ได้เชื่อมต่อบัญชี LINE" });
   try {
+    const link = await readPath(lineLinkPath(hubId));
+    if (!link?.lineUserId) return res.status(400).json({ error: "ยังไม่ได้เชื่อมต่อบัญชี LINE" });
     // timeZone required - see lineAlertWatchdog.js's nowTimeLabel comment
     // for why (server runs in UTC, not Bangkok, without it).
     const time = new Date().toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "Asia/Bangkok" });
-    await pushLineMessage(row.line_user_id, `🔔 นี่คือข้อความทดสอบจาก JK BMS Dashboard (${time})`);
+    await pushLineMessage(link.lineUserId, `🔔 นี่คือข้อความทดสอบจาก JK BMS Dashboard (${time})`);
     res.json({ ok: true });
   } catch (err) {
     console.error(`LINE test push failed for hub ${hubId}: ${err.message}`);
@@ -99,12 +129,22 @@ router.post("/test", requireAuth, async (req, res) => {
   }
 });
 
-router.delete("/unlink", requireAuth, (req, res) => {
+router.delete("/unlink", requireAuth, requireFirebase, async (req, res) => {
   const hubId = requireOwnHub(req, res);
   if (!hubId) return;
-  db.prepare(`DELETE FROM line_links WHERE hub_id = ?`).run(hubId);
-  db.prepare(`DELETE FROM line_alert_state WHERE hub_id = ?`).run(hubId);
-  res.json({ ok: true });
+  try {
+    await writePath(lineLinkPath(hubId), null);
+    // line_alert_state (the per-condition edge-trigger dedup) stays in
+    // SQLite - unlike the link itself, losing this on redeploy is
+    // harmless self-healing (worst case: one duplicate notification for
+    // whatever's already breached right after a deploy), so it wasn't
+    // worth the same Firebase migration.
+    db.prepare(`DELETE FROM line_alert_state WHERE hub_id = ?`).run(hubId);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(`DELETE /api/line/unlink failed for hub ${hubId}: ${err.message}`);
+    res.status(503).json({ error: "Could not unlink LINE account" });
+  }
 });
 
 export default router;

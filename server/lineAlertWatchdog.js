@@ -32,33 +32,45 @@ function nowTimeLabel() {
   return new Date().toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "Asia/Bangkok" });
 }
 
-// Same freshness check useBmsPackLive.js's frontend Online/Offline badge
-// already uses (confirmed live, BLE physically unplugged, 2026-07-27) -
-// NOT chargeWatchdog.js's own copy, which reads status.uptime_seconds and
-// was found to never actually fire here: the real field is
-// info.uptime_seconds (a sibling of status, not inside it), so that
-// version silently never detected a real disconnect. "Fresh" means EITHER
-// info.uptime_seconds increased (device's own seconds-since-boot counter
-// only ever climbs) OR any field in status changed at all - the second
-// check catches a board whose uptime_seconds reporting is flaky while the
-// rest of its telemetry keeps moving. In-memory, resets on restart - the
+// Same freshness SIGNAL useBmsPackLive.js's frontend Online/Offline badge
+// uses (confirmed live, BLE physically unplugged, 2026-07-27) - NOT
+// chargeWatchdog.js's own copy, which reads status.uptime_seconds and was
+// found to never actually fire here: the real field is info.uptime_seconds
+// (a sibling of status, not inside it). "Fresh this poll" means EITHER
+// info.uptime_seconds increased OR any field in status changed at all.
+//
+// But unlike an earlier version of this function, "fresh this poll" is NOT
+// by itself "online" - real Firebase writes are confirmed to be up to ~20s
+// apart even on a perfectly healthy device (same reasoning BMSDashboard.jsx's
+// own STALE_AFTER_MS is tuned around), while this watchdog polls every
+// CHECK_INTERVAL_MS=15s. Comparing only against the immediately-previous
+// poll made a single quiet 15s window look identical to a real disconnect,
+// firing an offline alert immediately followed by a reconnect alert the
+// next cycle it changed - exactly the repeated ~15s-apart flapping reported
+// 2026-08-25. Fixed by tracking elapsed time since the last real change
+// (lastChangedAt) and only calling it stale once that exceeds
+// STALE_AFTER_MS, mirroring BMSDashboard.jsx's own now-lastUpdateAt check
+// instead of a bare single-cycle diff. In-memory, resets on restart - the
 // very first poll after a deploy has no prior value to compare against, so
 // it can never itself report "just went offline" (or "just came back").
+const STALE_AFTER_MS = 30_000;
 const lastSeenByDevice = new Map();
 function isDeviceStale(hubId, bmsKey, data) {
   const key = bmsKey ? `${hubId}/${bmsKey}` : hubId;
   const uptime = data.info?.uptime_seconds;
   const statusJson = JSON.stringify(data.status);
+  const now = Date.now();
   const prev = lastSeenByDevice.get(key);
 
   const uptimeIncreased = typeof uptime === "number" && (!prev || prev.uptime == null || uptime > prev.uptime);
   const statusChanged = !prev || prev.statusJson !== statusJson;
   const isFresh = uptimeIncreased || statusChanged;
+  const lastChangedAt = isFresh || !prev ? now : prev.lastChangedAt;
 
-  lastSeenByDevice.set(key, { uptime, statusJson });
+  lastSeenByDevice.set(key, { uptime, statusJson, lastChangedAt });
 
   if (!prev) return false;
-  return !isFresh;
+  return now - lastChangedAt > STALE_AFTER_MS;
 }
 
 // Each condition: `id` (for line_alert_state's PK + dedup), `check(status,
@@ -319,18 +331,24 @@ async function checkFleetAverage(hubId, devices, lineUserId) {
 async function runCycle() {
   if (!isLineMessagingConfigured) return;
 
-  const links = db.prepare(`SELECT hub_id, line_user_id FROM line_links`).all();
-  if (links.length === 0) return;
+  // The link itself lives in Firebase now (JK_BMS_HUB/{hubId}/line_link,
+  // not a SQLite table - see routes/line.js's own comment on why), so this
+  // reads the whole tree once and picks out whichever hubs have one - same
+  // cost class as chargeWatchdog.js's own whole-tree-per-cycle read, and
+  // actually fewer round-trips than the old per-hub SQLite-driven reads.
+  let allHubs;
+  try {
+    allHubs = await readPath("JK_BMS_HUB");
+  } catch (err) {
+    console.error(`[LineAlertWatchdog] whole-tree read failed: ${err.message}`);
+    return;
+  }
+  if (!allHubs || typeof allHubs !== "object") return;
 
-  for (const { hub_id: hubId, line_user_id: lineUserId } of links) {
-    let hubData;
-    try {
-      hubData = await readPath(`JK_BMS_HUB/${hubId}`);
-    } catch (err) {
-      console.error(`[LineAlertWatchdog] read failed for ${hubId}: ${err.message}`);
-      continue;
-    }
+  for (const [hubId, hubData] of Object.entries(allHubs)) {
     if (!hubData || typeof hubData !== "object") continue;
+    const lineUserId = hubData.line_link?.lineUserId;
+    if (!lineUserId) continue;
 
     const bmsEntries = Object.entries(hubData).filter(([, v]) => isBmsDevice(v));
     let devices = [];

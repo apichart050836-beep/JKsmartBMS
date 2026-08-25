@@ -129,16 +129,13 @@ CREATE TABLE IF NOT EXISTS pending_signups (
   requested_at INTEGER NOT NULL
 );
 
--- Personal LINE push notifications (explicit request) - one row per hub
--- (a 'user' session owns exactly one hub, see hubAccess.js), linking it to
--- the LINE userId obtained via LINE Login OAuth (server/lineAuth.js). This
--- is what lineAlertWatchdog.js reads to know who to push to; a hub with no
--- row here just never gets checked/notified.
-CREATE TABLE IF NOT EXISTS line_links (
-  hub_id      TEXT PRIMARY KEY,
-  line_user_id TEXT NOT NULL,
-  linked_at   INTEGER NOT NULL
-);
+-- The LINE account link itself lives in Firebase now, NOT here
+-- (JK_BMS_HUB/{hubId}/line_link - see routes/line.js's own comment) -
+-- moved out of this table (which used to exist here) because Render's
+-- free-tier disk is ephemeral and gets wiped on every deploy, which was
+-- forcing a full LINE-reconnect on every single git push (explicit
+-- report). Only the edge-trigger dedup state below stays in SQLite -
+-- losing THAT on redeploy is harmless (self-heals within one poll cycle).
 
 -- Edge-trigger state for each (hub, device, condition) the watchdog
 -- checks (cell imbalance, SOC thresholds, charge/discharge current
