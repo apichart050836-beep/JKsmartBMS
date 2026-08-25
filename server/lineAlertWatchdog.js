@@ -21,26 +21,44 @@ function deviceLabel(hubId, bmsKey, settings) {
   return settings?.my_custom_name || (bmsKey ? `${hubId}/${bmsKey}` : hubId);
 }
 
+// Explicit timeZone is required here - without it, toLocaleTimeString uses
+// th-TH only for number/format conventions but the SERVER PROCESS's own
+// clock for the actual time, which on Render is UTC (not Bangkok/UTC+7) -
+// every notification was showing a time 7 hours behind real Thai time
+// until this was pinned down. Bangkok never observes DST, so this is
+// always correct with no seasonal adjustment needed (same reasoning
+// history.js's bangkokMs already documents).
 function nowTimeLabel() {
-  return new Date().toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return new Date().toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "Asia/Bangkok" });
 }
 
-// Same "uptime_seconds hasn't moved since the last check" staleness check
-// chargeWatchdog.js already uses - a live device's own seconds-since-boot
-// counter only ever climbs, so an unchanged reading between two polls means
-// the last Firebase write is frozen (BLE/WiFi dropped), not a fresh one.
-// In-memory, resets on restart - the very first poll after a deploy has no
-// prior value to compare against, so it can never itself report "just went
-// offline" (or "just came back") - same accepted tradeoff as
-// chargeWatchdog.js's own copy of this pattern.
-const lastUptimeByDevice = new Map();
-function isDeviceStale(hubId, bmsKey, status) {
+// Same freshness check useBmsPackLive.js's frontend Online/Offline badge
+// already uses (confirmed live, BLE physically unplugged, 2026-07-27) -
+// NOT chargeWatchdog.js's own copy, which reads status.uptime_seconds and
+// was found to never actually fire here: the real field is
+// info.uptime_seconds (a sibling of status, not inside it), so that
+// version silently never detected a real disconnect. "Fresh" means EITHER
+// info.uptime_seconds increased (device's own seconds-since-boot counter
+// only ever climbs) OR any field in status changed at all - the second
+// check catches a board whose uptime_seconds reporting is flaky while the
+// rest of its telemetry keeps moving. In-memory, resets on restart - the
+// very first poll after a deploy has no prior value to compare against, so
+// it can never itself report "just went offline" (or "just came back").
+const lastSeenByDevice = new Map();
+function isDeviceStale(hubId, bmsKey, data) {
   const key = bmsKey ? `${hubId}/${bmsKey}` : hubId;
-  const uptime = status.uptime_seconds;
-  const prevUptime = lastUptimeByDevice.get(key);
-  if (typeof uptime === "number") lastUptimeByDevice.set(key, uptime);
-  if (typeof uptime !== "number" || typeof prevUptime !== "number") return false;
-  return uptime <= prevUptime;
+  const uptime = data.info?.uptime_seconds;
+  const statusJson = JSON.stringify(data.status);
+  const prev = lastSeenByDevice.get(key);
+
+  const uptimeIncreased = typeof uptime === "number" && (!prev || prev.uptime == null || uptime > prev.uptime);
+  const statusChanged = !prev || prev.statusJson !== statusJson;
+  const isFresh = uptimeIncreased || statusChanged;
+
+  lastSeenByDevice.set(key, { uptime, statusJson });
+
+  if (!prev) return false;
+  return !isFresh;
 }
 
 // Each condition: `id` (for line_alert_state's PK + dedup), `check(status,
@@ -177,7 +195,7 @@ async function checkDevice(hubId, bmsKey, data, lineUserId) {
   // threshold. While a device is offline its last-known status/settings
   // are frozen, not live, so the other conditions are skipped entirely for
   // this cycle rather than potentially re-alerting on stale numbers.
-  const stale = isDeviceStale(hubId, bmsKey, status);
+  const stale = isDeviceStale(hubId, bmsKey, data);
   const offlineRow = getAlertState(hubId, bmsKeyNorm, OFFLINE_CONDITION_ID);
   const wasOffline = offlineRow ? !!offlineRow.active : false;
   if (stale && !wasOffline) {
@@ -225,6 +243,46 @@ async function checkDevice(hubId, bmsKey, data, lineUserId) {
   }
 }
 
+// Fleet-wide (every BMS device under one hub, not per-device) average
+// battery alert, per explicit request - same aggregation formula as
+// BMSDashboard.jsx's "Battery" box: sum of each device's capacity_remain
+// (Ah), sum of each device's own nominal_capacity (Ah), SOC% = remaining/
+// total*100. Notifies once per crossed 10%-decile in EITHER direction
+// (e.g. 41%->39% fires once for the 40->30 decile change; 39%->31% does
+// not fire again since it's still the same decile) - a plain in-memory
+// "last notified decile" per hub, not tied to line_alert_state's boolean
+// active/inactive shape since a decile is a number, not a threshold
+// breach. Resets on restart - the first cycle after a deploy only seeds
+// the baseline, never itself fires (nothing to compare against yet).
+const lastNotifiedDecileByHub = new Map();
+async function checkFleetAverage(hubId, devices, lineUserId) {
+  let remainingAh = 0;
+  let capacityAh = 0;
+  let current = 0;
+  for (const { status } of devices) {
+    remainingAh += status.capacity_remain || 0;
+    capacityAh += status.nominal_capacity || 0;
+    current += status.charge_current || 0;
+  }
+  if (capacityAh <= 0) return; // nothing real to compute a % from yet
+
+  const soc = Math.max(0, Math.min(100, (remainingAh / capacityAh) * 100));
+  const decile = Math.floor(soc / 10);
+  const prevDecile = lastNotifiedDecileByHub.get(hubId);
+  lastNotifiedDecileByHub.set(hubId, decile);
+
+  if (prevDecile === undefined || decile === prevDecile) return;
+
+  const direction = decile > prevDecile ? "เพิ่มขึ้น" : "ลดลง";
+  const currentLabel = current > 0 ? `+${current.toFixed(1)}` : current.toFixed(1);
+  const message = `🔋 แบตเฉลี่ยทั้งระบบ${direction} เหลือ ${soc.toFixed(0)}% (${remainingAh.toFixed(1)}/${capacityAh.toFixed(1)}Ah) ${currentLabel} A (${nowTimeLabel()})`;
+  try {
+    await pushLineMessage(lineUserId, message);
+  } catch (err) {
+    console.error(`[LineAlertWatchdog] fleet average push failed for ${hubId}: ${err.message}`);
+  }
+}
+
 async function runCycle() {
   if (!isLineMessagingConfigured) return;
 
@@ -242,14 +300,23 @@ async function runCycle() {
     if (!hubData || typeof hubData !== "object") continue;
 
     const bmsEntries = Object.entries(hubData).filter(([, v]) => isBmsDevice(v));
+    let devices = [];
     if (bmsEntries.length > 0) {
+      devices = bmsEntries.map(([, data]) => data);
       for (const [bmsKey, data] of bmsEntries) {
         await checkDevice(hubId, bmsKey, data, lineUserId).catch((err) =>
           console.error(`[LineAlertWatchdog] ${hubId}/${bmsKey} failed: ${err.message}`)
         );
       }
     } else if (isBmsDevice(hubData)) {
+      devices = [hubData];
       await checkDevice(hubId, null, hubData, lineUserId).catch((err) => console.error(`[LineAlertWatchdog] ${hubId} failed: ${err.message}`));
+    }
+
+    if (devices.length > 0) {
+      await checkFleetAverage(hubId, devices, lineUserId).catch((err) =>
+        console.error(`[LineAlertWatchdog] fleet average for ${hubId} failed: ${err.message}`)
+      );
     }
   }
 }

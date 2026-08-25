@@ -19,6 +19,14 @@ export function LineNotifySettings({ open, onClose }) {
   // sent" rather than a generic connection error.
   const [testBusy, setTestBusy] = useState(false);
   const [testResult, setTestResult] = useState(null); // "ok" | "error" | null
+  // Pre-fetched the moment the modal opens (not inside handleConnect's own
+  // click handler) - on iOS Safari especially, an `await` between a tap and
+  // window.location.href breaks the "trusted user gesture" Universal Links
+  // need to auto-open the LINE app; without a value ready here already,
+  // the button's own click handler would have to await the network call
+  // itself, and the resulting navigation would just load LINE's page in
+  // the browser instead of jumping into the app.
+  const [loginUrl, setLoginUrl] = useState(null);
   // Set once, from the URL LINE redirected back to (see routes/line.js's
   // /callback) - "linked" | "error" | null. Read here rather than at the
   // dashboard's top level since this modal is the only place it's ever
@@ -39,6 +47,11 @@ export function LineNotifySettings({ open, onClose }) {
   useEffect(() => {
     if (!open) return;
     refresh();
+    setLoginUrl(null);
+    api
+      .lineLoginUrl()
+      .then(({ url }) => setLoginUrl(url))
+      .catch(() => {}); // handleConnect falls back to fetching it itself if this hasn't resolved yet
     // The ?line=linked/error param has done its job the moment this modal
     // has read it - strip it so a page refresh doesn't keep re-showing a
     // stale result banner.
@@ -50,16 +63,29 @@ export function LineNotifySettings({ open, onClose }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  async function handleConnect() {
+  function handleConnect() {
+    // Synchronous path (the whole point - see loginUrl's comment above):
+    // already have the URL, so this tap navigates immediately with no
+    // await in between, keeping the "trusted user gesture" Universal Links
+    // need to jump straight into the LINE app.
+    if (loginUrl) {
+      window.location.href = loginUrl;
+      return;
+    }
+    // Fallback only - the prefetch above hasn't resolved yet (opened and
+    // tapped within the same instant). Still works, just loses the
+    // guaranteed-synchronous navigation.
     setBusy(true);
     setError(null);
-    try {
-      const { url } = await api.lineLoginUrl();
-      window.location.href = url; // real top-level navigation - LINE's consent screen can't run inside a fetch
-    } catch (err) {
-      setError(err.message || "เริ่มการเชื่อมต่อไม่สำเร็จ");
-      setBusy(false);
-    }
+    api
+      .lineLoginUrl()
+      .then(({ url }) => {
+        window.location.href = url;
+      })
+      .catch((err) => {
+        setError(err.message || "เริ่มการเชื่อมต่อไม่สำเร็จ");
+        setBusy(false);
+      });
   }
 
   async function handleTest() {

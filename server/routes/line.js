@@ -58,6 +58,16 @@ router.get("/callback", async (req, res) => {
 
   try {
     const lineUserId = await exchangeCodeForLineUserId(code);
+    // Strict 1-account-to-1-LINE in BOTH directions, per explicit request -
+    // a real LINE account must never end up receiving another hub's BMS
+    // alerts. hub_id is already unique (PRIMARY KEY), but line_user_id had
+    // no such guarantee - if the same LINE account were ever linked to a
+    // second hub (e.g. the same person testing under two different demo
+    // accounts), both hubs' alerts would land in that one LINE account.
+    // Detaching any other hub's link to this exact lineUserId first makes
+    // linking here effectively a MOVE, not an ADD - only the most recent
+    // hub this LINE account was linked to ever receives its alerts.
+    db.prepare(`DELETE FROM line_links WHERE line_user_id = ? AND hub_id != ?`).run(lineUserId, hubId);
     db.prepare(
       `INSERT INTO line_links (hub_id, line_user_id, linked_at) VALUES (?, ?, ?)
        ON CONFLICT (hub_id) DO UPDATE SET line_user_id = excluded.line_user_id, linked_at = excluded.linked_at`
@@ -78,7 +88,9 @@ router.post("/test", requireAuth, async (req, res) => {
   const row = db.prepare(`SELECT line_user_id FROM line_links WHERE hub_id = ?`).get(hubId);
   if (!row) return res.status(400).json({ error: "ยังไม่ได้เชื่อมต่อบัญชี LINE" });
   try {
-    const time = new Date().toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    // timeZone required - see lineAlertWatchdog.js's nowTimeLabel comment
+    // for why (server runs in UTC, not Bangkok, without it).
+    const time = new Date().toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "Asia/Bangkok" });
     await pushLineMessage(row.line_user_id, `🔔 นี่คือข้อความทดสอบจาก JK BMS Dashboard (${time})`);
     res.json({ ok: true });
   } catch (err) {

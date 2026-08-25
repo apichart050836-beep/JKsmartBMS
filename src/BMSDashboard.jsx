@@ -626,7 +626,7 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
 
                   <div className="flex items-center gap-2.5 bg-slate-900/80 border border-slate-800/90 px-3.5 py-1.5 rounded-xl shadow-sm">
                     <span className="size-2.5 rounded-full bg-emerald-400 animate-ping"></span>
-                    <span className="text-xs text-slate-300 font-medium">System Bus: <strong className="text-white font-mono">{avgPackVoltage.toFixed(2)}V</strong></span>
+                    <span className="text-xs text-slate-300 font-medium">System Vol: <strong className="text-white font-mono">{avgPackVoltage.toFixed(2)}V</strong></span>
                   </div>
                 </div>
 
@@ -811,7 +811,7 @@ const loadConsumptionPower = totalPower < 0 ? Math.abs(totalPower) : 0;
                           <div className="absolute bottom-[8%] left-[33%] -translate-x-1/2 bg-slate-900/95 backdrop-blur-xl border border-teal-500/40 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl sm:rounded-2xl text-center z-20 shadow-xl shadow-teal-950/30 min-w-[140px] sm:min-w-[180px] ring-1 ring-teal-500/20">
                             <div className="flex items-center justify-center gap-1 mb-0.5">
                               <span className="size-1.5 sm:size-2 rounded-full bg-teal-400 animate-pulse"></span>
-                              <span className="text-[8px] sm:text-[10px] uppercase tracking-wider font-bold text-teal-400">Battery Bank</span>
+                              <span className="text-[8px] sm:text-[10px] uppercase tracking-wider font-bold text-teal-400">Battery</span>
                             </div>
                             
                             <div className="text-xs sm:text-base font-extrabold text-white font-mono tracking-tight my-0.5">
