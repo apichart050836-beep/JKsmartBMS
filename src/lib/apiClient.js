@@ -111,6 +111,8 @@ export const api = {
   lineLoginUrl: () => request("/api/line/login-url"),
   lineTest: () => request("/api/line/test", { method: "POST" }),
   lineUnlink: () => request("/api/line/unlink", { method: "DELETE" }),
+  linePrefs: () => request("/api/line/prefs"),
+  saveLinePrefs: (prefs) => request("/api/line/prefs", { method: "PUT", body: JSON.stringify(prefs) }),
 };
 
 export const API_BASE_URL = API_BASE;

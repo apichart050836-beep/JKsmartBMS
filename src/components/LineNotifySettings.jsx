@@ -10,10 +10,18 @@ import { api } from "../lib/apiClient.js";
 // condition alerts to (cell imbalance, SOC thresholds, charge/discharge
 // current thresholds - see that file's CONDITIONS list for the exact
 // wording/thresholds).
+// Defaults mirror lineAlertWatchdog.js's DEFAULT_PREFS exactly - shown here
+// before the real saved value has loaded (or for a hub that's never saved
+// any prefs yet) so the checklist doesn't flash as all-unchecked first.
+const DEFAULT_PREFS = { remind1h: false, remind2h: true, step10: true, step20: false, weatherEnabled: false };
+const PREFS_KEYS = ["remind1h", "remind2h", "step10", "step20", "weatherEnabled"];
+
 export function LineNotifySettings({ open, onClose }) {
   const [status, setStatus] = useState(null); // { linked, linkedAt } | null while loading
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [prefs, setPrefs] = useState(DEFAULT_PREFS);
+  const [prefsSaving, setPrefsSaving] = useState(false);
   // Separate from `busy`/`error` above (connect/unlink) so a test push
   // doesn't disable/clash with those, and its own result reads as "test
   // sent" rather than a generic connection error.
@@ -52,6 +60,10 @@ export function LineNotifySettings({ open, onClose }) {
       .lineLoginUrl()
       .then(({ url }) => setLoginUrl(url))
       .catch(() => {}); // handleConnect falls back to fetching it itself if this hasn't resolved yet
+    api
+      .linePrefs()
+      .then((saved) => setPrefs({ ...DEFAULT_PREFS, ...saved }))
+      .catch(() => {}); // stays on DEFAULT_PREFS - matches the watchdog's own fallback
     // The ?line=linked/error param has done its job the moment this modal
     // has read it - strip it so a page refresh doesn't keep re-showing a
     // stale result banner.
@@ -99,6 +111,32 @@ export function LineNotifySettings({ open, onClose }) {
     } finally {
       setTestBusy(false);
     }
+  }
+
+  // Auto-saves on every toggle (no separate Save button) - matches how the
+  // rest of this modal already behaves (connect/unlink/test all fire
+  // immediately on click).
+  async function savePrefs(next) {
+    setPrefs(next);
+    setPrefsSaving(true);
+    try {
+      await api.saveLinePrefs(next);
+    } catch {
+      // Best-effort - the checklist stays visually toggled either way, and
+      // the next open re-loads whatever actually made it to Firebase.
+    } finally {
+      setPrefsSaving(false);
+    }
+  }
+
+  function togglePref(key) {
+    savePrefs({ ...prefs, [key]: !prefs[key] });
+  }
+
+  const allChecked = PREFS_KEYS.every((key) => prefs[key]);
+  function toggleAll() {
+    const next = !allChecked;
+    savePrefs(Object.fromEntries(PREFS_KEYS.map((key) => [key, next])));
   }
 
   async function handleUnlink() {
@@ -179,6 +217,45 @@ export function LineNotifySettings({ open, onClose }) {
                 ส่งไม่สำเร็จ - ตรวจสอบว่าได้เพิ่มบัญชี LINE ทางการเป็นเพื่อนแล้ว
               </p>
             )}
+
+            <div className="space-y-1.5 rounded-xl border border-[var(--border)] p-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold text-[var(--foreground)]">แจ้งเตือนแบตเฉลี่ยทั้งระบบ</p>
+                {prefsSaving && <span className="text-[10px] text-[var(--muted-foreground)]">กำลังบันทึก...</span>}
+              </div>
+              <label className="flex items-center gap-2 border-b border-[var(--border)] pb-1.5 text-xs text-[var(--foreground)]">
+                <input type="checkbox" checked={allChecked} onChange={toggleAll} className="size-3.5" />
+                เลือกทั้งหมด
+              </label>
+              <label className="flex items-center gap-2 text-xs text-[var(--foreground)]">
+                <input type="checkbox" checked={prefs.remind1h} onChange={() => togglePref("remind1h")} className="size-3.5" />
+                แจ้งเตือนซ้ำทุก 1 ชม. (ถ้า % ค้างไม่เปลี่ยน)
+              </label>
+              <label className="flex items-center gap-2 text-xs text-[var(--foreground)]">
+                <input type="checkbox" checked={prefs.remind2h} onChange={() => togglePref("remind2h")} className="size-3.5" />
+                แจ้งเตือนซ้ำทุก 2 ชม. (ถ้า % ค้างไม่เปลี่ยน)
+              </label>
+              <label className="flex items-center gap-2 text-xs text-[var(--foreground)]">
+                <input type="checkbox" checked={prefs.step10} onChange={() => togglePref("step10")} className="size-3.5" />
+                แจ้งเตือนเพิ่มหรือลดทุก 10%
+              </label>
+              <label className="flex items-center gap-2 text-xs text-[var(--foreground)]">
+                <input type="checkbox" checked={prefs.step20} onChange={() => togglePref("step20")} className="size-3.5" />
+                แจ้งเตือนเพิ่มหรือลดทุก 20%
+              </label>
+              <label className="flex items-center gap-2 text-xs text-[var(--foreground)]">
+                <input
+                  type="checkbox"
+                  checked={prefs.weatherEnabled}
+                  onChange={() => togglePref("weatherEnabled")}
+                  className="size-3.5"
+                />
+                แจ้งเตือนสภาพอากาศ (ฝนตกหรือแดดออกเท่านั้น)
+              </label>
+              <p className="pt-0.5 text-[10px] text-[var(--muted-foreground)]">
+                ต้องตั้งค่าตำแหน่งติดตั้ง (สภาพอากาศ) ไว้ก่อน ถึงจะแจ้งเตือนได้
+              </p>
+            </div>
           </div>
         ) : (
           <button

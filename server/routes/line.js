@@ -24,6 +24,15 @@ function lineLinkPath(hubId) {
   return `JK_BMS_HUB/${hubId}/line_link`;
 }
 
+// Per-hub notification checklist (select all / remind 1h / remind 2h /
+// weather / step 10% / step 20% - see lineAlertWatchdog.js's normalizePrefs
+// for how these combine), same durable Firebase placement as line_link
+// above and for the same reason.
+function linePrefsPath(hubId) {
+  return `JK_BMS_HUB/${hubId}/line_prefs`;
+}
+const PREFS_KEYS = ["remind1h", "remind2h", "step10", "step20", "weatherEnabled"];
+
 // Strict 1-account-to-1-LINE in BOTH directions (per explicit request) - a
 // real LINE account must never end up receiving another hub's BMS alerts.
 // Scans the whole hub tree for any OTHER hub whose line_link.lineUserId
@@ -70,6 +79,34 @@ router.get("/status", requireAuth, async (req, res) => {
   } catch (err) {
     console.error(`GET /api/line/status failed for hub ${hubId}: ${err.message}`);
     res.status(503).json({ error: "Could not read LINE link status" });
+  }
+});
+
+router.get("/prefs", requireAuth, async (req, res) => {
+  const hubId = requireOwnHub(req, res);
+  if (!hubId) return;
+  try {
+    const prefs = await readPath(linePrefsPath(hubId));
+    res.json(prefs && typeof prefs === "object" ? prefs : {});
+  } catch (err) {
+    console.error(`GET /api/line/prefs failed for hub ${hubId}: ${err.message}`);
+    res.status(503).json({ error: "Could not read LINE notification preferences" });
+  }
+});
+
+router.put("/prefs", requireAuth, async (req, res) => {
+  const hubId = requireOwnHub(req, res);
+  if (!hubId) return;
+  // Only ever write the 5 known boolean keys - never trust arbitrary
+  // request body shape straight into Firebase.
+  const prefs = {};
+  for (const key of PREFS_KEYS) prefs[key] = !!req.body?.[key];
+  try {
+    await writePath(linePrefsPath(hubId), prefs);
+    res.json({ ok: true, prefs });
+  } catch (err) {
+    console.error(`PUT /api/line/prefs failed for hub ${hubId}: ${err.message}`);
+    res.status(503).json({ error: "Could not save LINE notification preferences" });
   }
 });
 

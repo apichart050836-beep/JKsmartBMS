@@ -1,6 +1,7 @@
 import { db } from "./db.js";
 import { readPath } from "./firebaseRead.js";
 import { pushLineMessage, isLineMessagingConfigured } from "./lineNotify.js";
+import { isWeatherConfigured, fetchWeather } from "./weatherService.js";
 
 // Every 15s - prompt enough to catch a real battery event quickly without
 // hammering Firebase/LINE for something that isn't sub-second-sensitive
@@ -15,6 +16,23 @@ const NEAR_LIMIT_FRACTION = 0.9;
 // Same real BLE-read shape check chargeWatchdog.js uses.
 function isBmsDevice(value) {
   return !!value && typeof value === "object" && value.status && typeof value.status === "object" && value.settings && typeof value.settings === "object";
+}
+
+// Looser than isBmsDevice() - the fleet-average sum below only ever reads
+// status fields (capacity_remain, nominal_capacity, charge_current,
+// battery_voltage), never settings, so it shouldn't require settings to be
+// present too. Confirmed live (2026-08-25) that requiring both was the real
+// cause of the fleet-average spamming false 10%-decile crossings: a
+// device's settings node came back briefly missing from a Firebase read
+// (its own separate write racing this one) while status kept updating
+// normally, so isBmsDevice() dropped that whole device out of the sum for
+// that single poll - total nominal_capacity was seen flipping between two
+// values (e.g. 600Ah/900Ah) 15-30s apart, exactly matching one ~300Ah
+// device disappearing and reappearing, swinging the average SOC by several
+// percent purely from the device count changing, not any real battery
+// movement.
+function isFleetCountable(value) {
+  return !!value && typeof value === "object" && value.status && typeof value.status === "object" && typeof value.status.nominal_capacity === "number";
 }
 
 function deviceLabel(hubId, bmsKey, settings) {
@@ -94,10 +112,10 @@ const CONDITIONS = [
     },
   },
   {
-    id: "soc_near_full_90",
+    id: "soc_near_full_95",
     check(status) {
       const soc = status.percent_remain ?? 0;
-      return soc >= 90 && soc < 100;
+      return soc >= 95 && soc < 100;
     },
     message(status, settings, label) {
       return `🔋 ${label}\nแบตใกล้เต็มแล้ว (${(status.percent_remain ?? 0).toFixed(0)}%, ${(status.battery_voltage ?? 0).toFixed(2)}V)`;
@@ -113,10 +131,10 @@ const CONDITIONS = [
     },
   },
   {
-    id: "soc_near_empty_25",
+    id: "soc_near_empty_15",
     check(status) {
       const soc = status.percent_remain ?? 100;
-      return soc <= 25 && soc > 10;
+      return soc <= 15 && soc > 10;
     },
     message(status, settings, label) {
       return `🪫 ${label}\nแบตใกล้หมดแล้ว (${(status.percent_remain ?? 0).toFixed(0)}%, ${(status.battery_voltage ?? 0).toFixed(2)}V)`;
@@ -277,26 +295,114 @@ async function checkDevice(hubId, bmsKey, data, lineUserId) {
   }
 }
 
+// Per-hub notification preferences, per explicit request (2026-08-25) for a
+// checklist on the LINE settings page: "เลือกทั้งหมด" (select all), remind
+// every 1h/2h, weather (rain/sun only), fleet-average step 10%/20% - a flat
+// multi-select, not mutually-exclusive radios, so both step boxes (or both
+// reminder boxes) CAN be checked at once. Rather than run two independent
+// trackers in that case, this just takes the finer/shorter of whichever are
+// enabled (step: 20 is already a subset of every 10%-crossing point, so
+// enabling both is equivalent to just 10; reminder: the shorter interval
+// would always win the race anyway) - checking more boxes only ever
+// increases notification frequency, never decreases it, matching what a
+// user checking more boxes would expect. Stored at
+// JK_BMS_HUB/{hubId}/line_prefs (see routes/line.js) - same durable
+// Firebase placement as line_link, for the same ephemeral-Render-disk
+// reason. Defaults preserve this feature's original hardcoded behavior
+// (remind2h + step10) for any hub that hasn't touched the new settings yet.
+const DEFAULT_PREFS = { remind1h: false, remind2h: true, step10: true, step20: false, weatherEnabled: false };
+function normalizePrefs(raw) {
+  const p = { ...DEFAULT_PREFS, ...(raw && typeof raw === "object" ? raw : {}) };
+  const steps = [p.step10 && 10, p.step20 && 20].filter(Boolean);
+  const reminderHours = [p.remind1h && 1, p.remind2h && 2].filter(Boolean);
+  return {
+    step: steps.length ? Math.min(...steps) : null,
+    reminderMs: reminderHours.length ? Math.min(...reminderHours) * 60 * 60 * 1000 : null,
+    weatherEnabled: !!p.weatherEnabled,
+  };
+}
+
+// Weather condition alert, per explicit request - only rain or clear/sun,
+// everything else (clouds, mist, ...) is deliberately not "interesting"
+// enough to notify about and just resets nothing. Reuses the exact same
+// per-hub installation location already saved for the dashboard's own
+// weather button (JK_BMS_HUB/{hubId}/location - see useWeatherLocation.js),
+// and the same OpenWeatherMap `condition` values the frontend's
+// WEATHER_ICONS map already keys off of. Rate-limited to one real API call
+// per hub every WEATHER_CHECK_INTERVAL_MS regardless of the 15s watchdog
+// cycle - weather doesn't change on a 15s cadence, and there's no reason to
+// burn OpenWeatherMap's rate limit checking it that often.
+const WEATHER_CHECK_INTERVAL_MS = 10 * 60 * 1000;
+const RAIN_CONDITIONS = new Set(["Rain", "Drizzle", "Thunderstorm"]);
+const SUN_CONDITIONS = new Set(["Clear"]);
+function weatherCategory(condition) {
+  if (RAIN_CONDITIONS.has(condition)) return "rain";
+  if (SUN_CONDITIONS.has(condition)) return "sun";
+  return "other";
+}
+const lastWeatherCheckAtByHub = new Map();
+const lastWeatherCategoryByHub = new Map();
+async function checkWeather(hubId, location, lineUserId) {
+  if (!isWeatherConfigured()) return;
+  if (!location || typeof location.lat !== "number" || typeof location.lng !== "number") return;
+
+  const lastCheckedAt = lastWeatherCheckAtByHub.get(hubId);
+  if (lastCheckedAt !== undefined && Date.now() - lastCheckedAt < WEATHER_CHECK_INTERVAL_MS) return;
+  lastWeatherCheckAtByHub.set(hubId, Date.now());
+
+  let weather;
+  try {
+    weather = await fetchWeather(location.lat, location.lng);
+  } catch (err) {
+    console.error(`[LineAlertWatchdog] weather fetch failed for ${hubId}: ${err.message}`);
+    return;
+  }
+
+  const category = weatherCategory(weather.condition);
+  const prevCategory = lastWeatherCategoryByHub.get(hubId);
+  lastWeatherCategoryByHub.set(hubId, category);
+
+  // Edge-triggered like everything else in this file: only notify the
+  // moment it TURNS into rain/sun from something else, not on every check
+  // while it stays that way, and never on the very first observation.
+  if (prevCategory === undefined || category === prevCategory || category === "other") return;
+
+  const icon = category === "rain" ? "🌧️" : "☀️";
+  const label = category === "rain" ? "ฝนตก" : "แดดออก";
+  const tempLabel = typeof weather.temperature === "number" ? ` ${weather.temperature.toFixed(0)}°C` : "";
+  const message = `${icon} สภาพอากาศ${location.name ? ` (${location.name})` : ""}: ${label}${tempLabel} (${nowTimeLabel()})`;
+  try {
+    await pushLineMessage(lineUserId, message);
+  } catch (err) {
+    console.error(`[LineAlertWatchdog] weather push failed for ${hubId}: ${err.message}`);
+  }
+}
+
 // Fleet-wide (every BMS device under one hub, not per-device) average
 // battery alert, per explicit request - same aggregation formula as
 // BMSDashboard.jsx's "Battery" box: sum of each device's capacity_remain
 // (Ah), sum of each device's own nominal_capacity (Ah), SOC% = remaining/
-// total*100. Notifies once per crossed 10%-decile in EITHER direction
-// (e.g. 41%->39% fires once for the 40->30 decile change; 39%->31% does
-// not fire again since it's still the same decile) - a plain in-memory
-// "last notified decile" per hub, not tied to line_alert_state's boolean
-// active/inactive shape since a decile is a number, not a threshold
-// breach. Resets on restart - the first cycle after a deploy only seeds
-// the baseline, never itself fires (nothing to compare against yet).
-const lastNotifiedDecileByHub = new Map();
-// Per explicit follow-up request: if SOC sits still inside the same decile
-// for a long time (e.g. parked at 60% for hours), send one "still at X%"
-// reminder every REMINDER_INTERVAL_MS rather than staying silent forever -
-// tracked separately from the decile-cross timing so a real cross always
-// resets the reminder clock too (no double-notify right after a cross).
-const REMINDER_INTERVAL_MS = 60 * 60 * 1000;
+// total*100. Notifies once per crossed step% (10 or 20, see `prefs.step`
+// below) in EITHER direction - a plain in-memory "last notified bin" per
+// hub, keyed by hubId+step so switching step size doesn't reuse a bin
+// number from the other size. Resets on restart - the first cycle after a
+// deploy only seeds the baseline, never itself fires (nothing to compare
+// against yet).
+//
+// Per explicit follow-up (2026-08-25): the Ah/current detail was dropped
+// from the message entirely - shows % (and V) only now. Not just cosmetic:
+// even after isFleetCountable's fix, the request was to stop depending on
+// the Ah figure being trustworthy in the notification text at all, so a
+// future glitch of the same shape can't produce a confusing-looking message
+// again even if it ever again affects the underlying sum.
+const lastNotifiedBinByHub = new Map();
+// If SOC sits still inside the same bin for a long time (e.g. parked at
+// 60% for hours), send one "still at X%" reminder every
+// `prefs.reminderMs` rather than staying silent forever - tracked
+// separately from the bin-cross timing so a real cross always resets the
+// reminder clock too (no double-notify right after a cross).
 const lastFleetNotifyAtByHub = new Map();
-async function checkFleetAverage(hubId, devices, lineUserId) {
+async function checkFleetAverage(hubId, devices, lineUserId, prefs) {
   let remainingAh = 0;
   let capacityAh = 0;
   let current = 0;
@@ -306,24 +412,30 @@ async function checkFleetAverage(hubId, devices, lineUserId) {
     current += status.charge_current || 0;
   }
   if (capacityAh <= 0) return; // nothing real to compute a % from yet
+  if (!prefs.step) return; // both step10/step20 disabled - feature off
 
   const soc = Math.max(0, Math.min(100, (remainingAh / capacityAh) * 100));
-  const decile = Math.floor(soc / 10);
-  const prevDecile = lastNotifiedDecileByHub.get(hubId);
-  lastNotifiedDecileByHub.set(hubId, decile);
+  const bin = Math.floor(soc / prefs.step);
+  const binKey = `${hubId}:${prefs.step}`;
+  const prevBin = lastNotifiedBinByHub.get(binKey);
+  lastNotifiedBinByHub.set(binKey, bin);
 
-  const currentLabel = current > 0 ? `+${current.toFixed(1)}` : current.toFixed(1);
-  const detail = `(${remainingAh.toFixed(1)}/${capacityAh.toFixed(1)}Ah) ${currentLabel} A (${nowTimeLabel()})`;
+  // Same convention BMSDashboard.jsx's "System Vol" tile already uses - the
+  // packs are wired in parallel, so they share (near enough) one real
+  // voltage rather than summing, and the first live device's own reading is
+  // the representative value (see its own comment on this exact tradeoff).
+  const voltage = devices.find((d) => d.status?.battery_voltage > 0)?.status?.battery_voltage ?? 0;
+  const detail = `${voltage.toFixed(2)}V (${nowTimeLabel()})`;
 
-  if (prevDecile === undefined) {
-    // First observation ever (or since restart) - just seed both baselines,
-    // never fire on it (nothing to compare against yet).
+  if (prevBin === undefined) {
+    // First observation ever (or since restart, or since this step size was
+    // just enabled) - just seed both baselines, never fire on it.
     lastFleetNotifyAtByHub.set(hubId, Date.now());
     return;
   }
 
-  if (decile !== prevDecile) {
-    const rising = decile > prevDecile;
+  if (bin !== prevBin) {
+    const rising = bin > prevBin;
     // Per explicit request: "เป็น" reads naturally for an increase ("...
     // เพิ่มขึ้น เป็น 50%"), "เหลือ" for a decrease ("...ลดลง เหลือ 50%") - a
     // single fixed word for both directions read awkwardly in Thai.
@@ -339,10 +451,12 @@ async function checkFleetAverage(hubId, devices, lineUserId) {
     return;
   }
 
-  // Same decile as last time - only remind once REMINDER_INTERVAL_MS has
-  // passed since the last notification (cross or reminder alike).
+  if (!prefs.reminderMs) return; // both remind1h/remind2h disabled - no repeat reminder
+
+  // Same bin as last time - only remind once prefs.reminderMs has passed
+  // since the last notification (cross or reminder alike).
   const lastNotifyAt = lastFleetNotifyAtByHub.get(hubId);
-  if (lastNotifyAt !== undefined && Date.now() - lastNotifyAt < REMINDER_INTERVAL_MS) return;
+  if (lastNotifyAt !== undefined && Date.now() - lastNotifyAt < prefs.reminderMs) return;
 
   const message = `🔋 แบตเฉลี่ยทั้งระบบยังคงอยู่ที่ ${soc.toFixed(0)}% ${detail}`;
   try {
@@ -376,22 +490,39 @@ async function runCycle() {
     if (!lineUserId) continue;
 
     const bmsEntries = Object.entries(hubData).filter(([, v]) => isBmsDevice(v));
-    let devices = [];
     if (bmsEntries.length > 0) {
-      devices = bmsEntries.map(([, data]) => data);
       for (const [bmsKey, data] of bmsEntries) {
         await checkDevice(hubId, bmsKey, data, lineUserId).catch((err) =>
           console.error(`[LineAlertWatchdog] ${hubId}/${bmsKey} failed: ${err.message}`)
         );
       }
     } else if (isBmsDevice(hubData)) {
-      devices = [hubData];
       await checkDevice(hubId, null, hubData, lineUserId).catch((err) => console.error(`[LineAlertWatchdog] ${hubId} failed: ${err.message}`));
     }
 
-    if (devices.length > 0) {
-      await checkFleetAverage(hubId, devices, lineUserId).catch((err) =>
+    // Deliberately a SEPARATE pass with its own looser filter (see
+    // isFleetCountable's comment) rather than reusing bmsEntries above - a
+    // device missing from that stricter list for one poll must not also
+    // drop out of the fleet-average sum.
+    const fleetEntries = Object.entries(hubData).filter(([, v]) => isFleetCountable(v));
+    let fleetDevices = [];
+    if (fleetEntries.length > 0) {
+      fleetDevices = fleetEntries.map(([, data]) => data);
+    } else if (isFleetCountable(hubData)) {
+      fleetDevices = [hubData];
+    }
+
+    const prefs = normalizePrefs(hubData.line_prefs);
+
+    if (fleetDevices.length > 0) {
+      await checkFleetAverage(hubId, fleetDevices, lineUserId, prefs).catch((err) =>
         console.error(`[LineAlertWatchdog] fleet average for ${hubId} failed: ${err.message}`)
+      );
+    }
+
+    if (prefs.weatherEnabled) {
+      await checkWeather(hubId, hubData.location, lineUserId).catch((err) =>
+        console.error(`[LineAlertWatchdog] weather for ${hubId} failed: ${err.message}`)
       );
     }
   }
