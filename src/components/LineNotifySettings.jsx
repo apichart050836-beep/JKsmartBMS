@@ -13,7 +13,18 @@ import { api } from "../lib/apiClient.js";
 // Defaults mirror lineAlertWatchdog.js's DEFAULT_PREFS exactly - shown here
 // before the real saved value has loaded (or for a hub that's never saved
 // any prefs yet) so the checklist doesn't flash as all-unchecked first.
-const DEFAULT_PREFS = { remind1h: false, remind2h: true, step10: true, step20: false, weatherEnabled: false };
+// wattLimit/chargeAmpLimit have no default (0 = that alert is off) - each
+// is a number the hub owner has to set themselves, not a checkbox, so
+// they're kept out of PREFS_KEYS/"เลือกทั้งหมด" below.
+const DEFAULT_PREFS = {
+  remind1h: true,
+  remind2h: false,
+  step10: false,
+  step20: true,
+  weatherEnabled: true,
+  wattLimit: 0,
+  chargeAmpLimit: 0,
+};
 const PREFS_KEYS = ["remind1h", "remind2h", "step10", "step20", "weatherEnabled"];
 
 export function LineNotifySettings({ open, onClose }) {
@@ -147,7 +158,30 @@ export function LineNotifySettings({ open, onClose }) {
   const allChecked = PREFS_KEYS.every((key) => prefs[key]);
   function toggleAll() {
     const next = !allChecked;
-    savePrefs(Object.fromEntries(PREFS_KEYS.map((key) => [key, next])));
+    // Preserve wattLimit - it's a number the owner set themselves, not part
+    // of this boolean group, so "select all" must never wipe it out.
+    savePrefs({ ...prefs, ...Object.fromEntries(PREFS_KEYS.map((key) => [key, next])) });
+  }
+
+  // wattLimit/chargeAmpLimit each get their own save path (debounced-on-
+  // blur, not on every keystroke like the checkboxes) since typing a number
+  // fires many more change events than a click ever would.
+  const [wattInput, setWattInput] = useState("");
+  useEffect(() => {
+    setWattInput(prefs.wattLimit ? String(prefs.wattLimit) : "");
+  }, [prefs.wattLimit]);
+  function saveWattLimit() {
+    const n = Number(wattInput);
+    savePrefs({ ...prefs, wattLimit: Number.isFinite(n) && n > 0 ? n : 0 });
+  }
+
+  const [chargeAmpInput, setChargeAmpInput] = useState("");
+  useEffect(() => {
+    setChargeAmpInput(prefs.chargeAmpLimit ? String(prefs.chargeAmpLimit) : "");
+  }, [prefs.chargeAmpLimit]);
+  function saveChargeAmpLimit() {
+    const n = Number(chargeAmpInput);
+    savePrefs({ ...prefs, chargeAmpLimit: Number.isFinite(n) && n > 0 ? n : 0 });
   }
 
   async function handleUnlink() {
@@ -279,6 +313,42 @@ export function LineNotifySettings({ open, onClose }) {
               </label>
               <p className="pt-0.5 text-[10px] text-[var(--muted-foreground)]">
                 ต้องตั้งค่าตำแหน่งติดตั้ง (สภาพอากาศ) ไว้ก่อน ถึงจะแจ้งเตือนได้
+              </p>
+
+              <div className="flex items-center gap-2 border-t border-[var(--border)] pt-1.5 text-xs text-[var(--foreground)]">
+                <span className="shrink-0">แจ้งเตือนเมื่อใช้พลังงานเกิน</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={wattInput}
+                  onChange={(e) => setWattInput(e.target.value)}
+                  onBlur={saveWattLimit}
+                  placeholder="ไม่ตั้งค่า"
+                  className="w-20 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs"
+                />
+                <span className="shrink-0">W</span>
+              </div>
+              <p className="text-[10px] text-[var(--muted-foreground)]">
+                ปล่อยว่างไว้ = ปิดการแจ้งเตือนนี้ (เฉพาะตอนใช้พลังงาน/จ่ายไฟออก ไม่นับตอนชาร์จ)
+              </p>
+
+              <div className="flex items-center gap-2 pt-1 text-xs text-[var(--foreground)]">
+                <span className="shrink-0">แจ้งเตือนเมื่อชาร์จเกิน</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={chargeAmpInput}
+                  onChange={(e) => setChargeAmpInput(e.target.value)}
+                  onBlur={saveChargeAmpLimit}
+                  placeholder="ไม่ตั้งค่า"
+                  className="w-20 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs"
+                />
+                <span className="shrink-0">A</span>
+              </div>
+              <p className="text-[10px] text-[var(--muted-foreground)]">
+                ปล่อยว่างไว้ = ปิดการแจ้งเตือนนี้ (เฉพาะตอนชาร์จ ไม่นับตอนใช้งาน)
               </p>
             </div>
           </div>

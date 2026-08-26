@@ -31,7 +31,7 @@ function lineLinkPath(hubId) {
 function linePrefsPath(hubId) {
   return `JK_BMS_HUB/${hubId}/line_prefs`;
 }
-const PREFS_KEYS = ["remind1h", "remind2h", "step10", "step20", "weatherEnabled"];
+const PREFS_BOOL_KEYS = ["remind1h", "remind2h", "step10", "step20", "weatherEnabled"];
 
 // Strict 1-account-to-1-LINE in BOTH directions (per explicit request) - a
 // real LINE account must never end up receiving another hub's BMS alerts.
@@ -112,10 +112,14 @@ router.get("/prefs", requireAuth, async (req, res) => {
 router.put("/prefs", requireAuth, async (req, res) => {
   const hubId = requireOwnHub(req, res);
   if (!hubId) return;
-  // Only ever write the 5 known boolean keys - never trust arbitrary
-  // request body shape straight into Firebase.
+  // Only ever write the known keys, each coerced to its own real type -
+  // never trust arbitrary request body shape straight into Firebase.
   const prefs = {};
-  for (const key of PREFS_KEYS) prefs[key] = !!req.body?.[key];
+  for (const key of PREFS_BOOL_KEYS) prefs[key] = !!req.body?.[key];
+  const wattLimit = Number(req.body?.wattLimit);
+  prefs.wattLimit = Number.isFinite(wattLimit) && wattLimit > 0 ? wattLimit : 0;
+  const chargeAmpLimit = Number(req.body?.chargeAmpLimit);
+  prefs.chargeAmpLimit = Number.isFinite(chargeAmpLimit) && chargeAmpLimit > 0 ? chargeAmpLimit : 0;
   try {
     await writePath(linePrefsPath(hubId), prefs);
     res.json({ ok: true, prefs });

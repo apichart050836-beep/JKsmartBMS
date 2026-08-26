@@ -308,9 +308,20 @@ async function checkDevice(hubId, bmsKey, data, lineUserId) {
 // user checking more boxes would expect. Stored at
 // JK_BMS_HUB/{hubId}/line_prefs (see routes/line.js) - same durable
 // Firebase placement as line_link, for the same ephemeral-Render-disk
-// reason. Defaults preserve this feature's original hardcoded behavior
-// (remind2h + step10) for any hub that hasn't touched the new settings yet.
-const DEFAULT_PREFS = { remind1h: false, remind2h: true, step10: true, step20: false, weatherEnabled: false };
+// reason. Defaults per explicit request (2026-08-26): remind1h + step20 +
+// weather on by default. wattLimit/chargeAmpLimit have no meaningful
+// default (0/unset means that alert is simply off until a hub owner sets
+// their own number - no one-size number makes sense across different
+// installations).
+const DEFAULT_PREFS = {
+  remind1h: true,
+  remind2h: false,
+  step10: false,
+  step20: true,
+  weatherEnabled: true,
+  wattLimit: 0,
+  chargeAmpLimit: 0,
+};
 function normalizePrefs(raw) {
   const p = { ...DEFAULT_PREFS, ...(raw && typeof raw === "object" ? raw : {}) };
   const steps = [p.step10 && 10, p.step20 && 20].filter(Boolean);
@@ -319,6 +330,8 @@ function normalizePrefs(raw) {
     step: steps.length ? Math.min(...steps) : null,
     reminderMs: reminderHours.length ? Math.min(...reminderHours) * 60 * 60 * 1000 : null,
     weatherEnabled: !!p.weatherEnabled,
+    wattLimit: typeof p.wattLimit === "number" && p.wattLimit > 0 ? p.wattLimit : null,
+    chargeAmpLimit: typeof p.chargeAmpLimit === "number" && p.chargeAmpLimit > 0 ? p.chargeAmpLimit : null,
   };
 }
 
@@ -467,6 +480,73 @@ async function checkFleetAverage(hubId, devices, lineUserId, prefs) {
   lastFleetNotifyAtByHub.set(hubId, Date.now());
 }
 
+// User-configurable Watt-usage alert, per explicit request (2026-08-26) -
+// "การใช้งาน" (usage/load draw) means net DISCHARGE power, matching this
+// codebase's established sign convention (negative current/power =
+// discharging - see BMSDashboard.jsx/useBmsPackLive.js). Fleet-wide total,
+// summed the same way remainingAh/capacityAh/current are above. Edge-
+// triggered through the same line_alert_state table the per-device
+// CONDITIONS use (hub-scoped, bmsKey="", a fixed condition id) rather than
+// a separate in-memory Map, since it's the same simple breach/recover
+// boolean shape as those.
+const WATT_ALERT_CONDITION_ID = "fleet_watt_over";
+async function checkFleetPower(hubId, devices, lineUserId, prefs) {
+  if (!prefs.wattLimit) return; // 0/unset - user hasn't turned this on
+
+  let totalPower = 0;
+  for (const { status } of devices) {
+    totalPower += status.power ?? status.battery_power ?? 0;
+  }
+  const usageWatt = totalPower < 0 ? -totalPower : 0;
+  const isBreached = usageWatt > prefs.wattLimit;
+  const row = getAlertState(hubId, "", WATT_ALERT_CONDITION_ID);
+  const wasActive = row ? !!row.active : false;
+
+  if (isBreached && !wasActive) {
+    const message = `⚡ แบตเฉลี่ยทั้งระบบใช้พลังงานเกินที่ตั้งไว้ (${usageWatt.toFixed(0)}W > ${prefs.wattLimit}W) (${nowTimeLabel()})`;
+    try {
+      await pushLineMessage(lineUserId, message);
+    } catch (err) {
+      console.error(`[LineAlertWatchdog] fleet watt push failed for ${hubId}: ${err.message}`);
+    }
+    setAlertState(hubId, "", WATT_ALERT_CONDITION_ID, 1);
+  } else if (!isBreached && wasActive) {
+    // Recovered - reset silently so the next real breach can notify again,
+    // same as the per-device CONDITIONS above.
+    setAlertState(hubId, "", WATT_ALERT_CONDITION_ID, 0);
+  }
+}
+
+// Same shape as checkFleetPower above, but the CHARGE side in Amps rather
+// than the discharge/usage side in Watts, per explicit request (2026-08-26)
+// - a separate user-set number, not derived from wattLimit, since Amps and
+// Watts aren't the same axis a user necessarily wants the same limit on.
+const CHARGE_AMP_ALERT_CONDITION_ID = "fleet_charge_amp_over";
+async function checkFleetChargeCurrent(hubId, devices, lineUserId, prefs) {
+  if (!prefs.chargeAmpLimit) return; // 0/unset - user hasn't turned this on
+
+  let totalCurrent = 0;
+  for (const { status } of devices) {
+    totalCurrent += status.charge_current || 0;
+  }
+  const chargeAmps = totalCurrent > 0 ? totalCurrent : 0;
+  const isBreached = chargeAmps > prefs.chargeAmpLimit;
+  const row = getAlertState(hubId, "", CHARGE_AMP_ALERT_CONDITION_ID);
+  const wasActive = row ? !!row.active : false;
+
+  if (isBreached && !wasActive) {
+    const message = `⚡ แบตเฉลี่ยทั้งระบบชาร์จเกินที่ตั้งไว้ (${chargeAmps.toFixed(1)}A > ${prefs.chargeAmpLimit}A) (${nowTimeLabel()})`;
+    try {
+      await pushLineMessage(lineUserId, message);
+    } catch (err) {
+      console.error(`[LineAlertWatchdog] fleet charge-amp push failed for ${hubId}: ${err.message}`);
+    }
+    setAlertState(hubId, "", CHARGE_AMP_ALERT_CONDITION_ID, 1);
+  } else if (!isBreached && wasActive) {
+    setAlertState(hubId, "", CHARGE_AMP_ALERT_CONDITION_ID, 0);
+  }
+}
+
 async function runCycle() {
   if (!isLineMessagingConfigured) return;
 
@@ -517,6 +597,12 @@ async function runCycle() {
     if (fleetDevices.length > 0) {
       await checkFleetAverage(hubId, fleetDevices, lineUserId, prefs).catch((err) =>
         console.error(`[LineAlertWatchdog] fleet average for ${hubId} failed: ${err.message}`)
+      );
+      await checkFleetPower(hubId, fleetDevices, lineUserId, prefs).catch((err) =>
+        console.error(`[LineAlertWatchdog] fleet watt for ${hubId} failed: ${err.message}`)
+      );
+      await checkFleetChargeCurrent(hubId, fleetDevices, lineUserId, prefs).catch((err) =>
+        console.error(`[LineAlertWatchdog] fleet charge-amp for ${hubId} failed: ${err.message}`)
       );
     }
 
