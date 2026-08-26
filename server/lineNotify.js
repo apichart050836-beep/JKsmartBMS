@@ -42,3 +42,34 @@ export async function pushLineMessage(lineUserId, text) {
     throw new Error(`LINE push failed (${res.status}): ${body.slice(0, 300)}`);
   }
 }
+
+// Confirmed real-world failure mode (2026-08-26): a user can complete the
+// LINE Login OAuth link just fine, and pushLineMessage above can even
+// resolve successfully, while LINE still silently never delivers anything -
+// because that specific LINE account never added this Official Account as a
+// friend. LINE has no way to detect/reject that at push time in every case,
+// so the actual fix is giving users a direct "Add friend" link instead of
+// making them search for the bot manually. The Basic ID (e.g. "@abc1234")
+// needed for that link isn't derivable from the Channel Access Token or any
+// other env var - it has to come from LINE's own "get bot info" endpoint,
+// authenticated with the SAME token this file already has, so no new secret
+// is needed. Cached in memory since a channel's Basic ID never changes.
+let cachedBotInfo = null;
+export async function getBotInfo() {
+  if (cachedBotInfo) return cachedBotInfo;
+  if (!isLineMessagingConfigured) throw new Error("LINE Messaging API not configured");
+  const res = await fetch("https://api.line.me/v2/bot/info", {
+    headers: { Authorization: `Bearer ${CHANNEL_ACCESS_TOKEN}` },
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`LINE bot info fetch failed (${res.status}): ${body.slice(0, 300)}`);
+  }
+  const data = await res.json();
+  cachedBotInfo = {
+    basicId: data.basicId ?? null,
+    pictureUrl: data.pictureUrl ?? null,
+    displayName: data.displayName ?? null,
+  };
+  return cachedBotInfo;
+}

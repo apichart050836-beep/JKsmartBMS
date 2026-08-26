@@ -107,6 +107,7 @@ export const api = {
   // LineNotifySettings.jsx. loginUrl() returns the LINE OAuth URL to
   // navigate the whole page to (real redirect, not a fetch) - LINE's
   // consent screen can't be shown inside a fetch.
+  lineBotInfo: () => request("/api/line/bot-info"),
   lineStatus: () => request("/api/line/status"),
   lineLoginUrl: () => request("/api/line/login-url"),
   lineTest: () => request("/api/line/test", { method: "POST" }),

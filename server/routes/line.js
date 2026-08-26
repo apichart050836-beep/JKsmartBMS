@@ -4,7 +4,7 @@ import { requireFirebase } from "../middleware/requireFirebase.js";
 import { db } from "../db.js";
 import { readPath, writePath } from "../firebaseRead.js";
 import { isLineLoginConfigured, signLinkState, verifyLinkState, buildLoginUrl, exchangeCodeForLineUserId } from "../lineAuth.js";
-import { pushLineMessage } from "../lineNotify.js";
+import { pushLineMessage, getBotInfo } from "../lineNotify.js";
 
 const router = Router();
 
@@ -79,6 +79,21 @@ router.get("/status", requireAuth, async (req, res) => {
   } catch (err) {
     console.error(`GET /api/line/status failed for hub ${hubId}: ${err.message}`);
     res.status(503).json({ error: "Could not read LINE link status" });
+  }
+});
+
+// Lets the frontend show a direct "add friend" link instead of making the
+// user search for the Official Account manually - see lineNotify.js's
+// getBotInfo comment for why this is needed at all (a completed OAuth link
+// alone doesn't guarantee messages will actually deliver).
+router.get("/bot-info", requireAuth, async (req, res) => {
+  try {
+    const info = await getBotInfo();
+    if (!info.basicId) return res.status(503).json({ error: "Bot info unavailable" });
+    res.json({ addFriendUrl: `https://line.me/R/ti/p/${info.basicId}`, pictureUrl: info.pictureUrl, displayName: info.displayName });
+  } catch (err) {
+    console.error(`GET /api/line/bot-info failed: ${err.message}`);
+    res.status(503).json({ error: "Could not load LINE bot info" });
   }
 });
 

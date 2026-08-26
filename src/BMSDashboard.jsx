@@ -22,7 +22,6 @@ import { computeAlarms } from "./lib/alarms.js";
 import { computeBatteryHealthScore } from "./lib/batteryHealthScore.js";
 import { AlarmList } from "./components/AlarmList.jsx";
 import { AnnouncementBanner } from "./components/AnnouncementBanner.jsx";
-import { FirmwareUpdateToast } from "./components/FirmwareUpdateToast.jsx";
 import { VersionCheckModal } from "./components/VersionCheckModal.jsx";
 import { useDailyEnergy } from "./hooks/useDailyEnergy.js";
 import { usePeakToday } from "./hooks/usePeakToday.js";
@@ -344,21 +343,6 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
     onSoftwareVersionChange,
   ]);
 
-  const prevVersionsRef = useRef({});
-  const [firmwareUpdate, setFirmwareUpdate] = useState(null);
-  useEffect(() => {
-    for (const pack of packs) {
-      const version = pack.info?.software_version;
-      if (!version) continue;
-      const prev = prevVersionsRef.current[pack.id];
-      if (prev !== undefined && prev !== version) {
-        setFirmwareUpdate({ deviceLabel: pack.name, version });
-        setTimeout(() => setFirmwareUpdate((cur) => (cur?.version === version ? null : cur)), 6000);
-      }
-      prevVersionsRef.current[pack.id] = version;
-    }
-  }, [bms0.info, bms1.info, bms2.info, bms3.info, bms4.info, bms5.info, bms6.info, bms7.info, bms8.info, bms9.info]);
-
   const dailyEnergy = useDailyEnergy(activeConfig.hubId, activeConfig.bmsKey);
   const activeEnergy = { chargedAh: dailyEnergy.chargedAh, dischargedAh: dailyEnergy.dischargedAh };
 
@@ -574,7 +558,6 @@ export default function BMSDashboard({ onSoftwareVersionChange }) {
           </div>
         ) : (
           <>
-            <FirmwareUpdateToast update={firmwareUpdate} />
             <TopBar
               tabs={slots
                 .filter((s) => s.live)

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Link2Off, Send } from "lucide-react";
+import { Link2Off, Send, UserPlus } from "lucide-react";
 import { Modal } from "./Modal.jsx";
 import { LineIcon } from "./icons/LineIcon.jsx";
 import { api } from "../lib/apiClient.js";
@@ -22,6 +22,13 @@ export function LineNotifySettings({ open, onClose }) {
   const [error, setError] = useState(null);
   const [prefs, setPrefs] = useState(DEFAULT_PREFS);
   const [prefsSaving, setPrefsSaving] = useState(false);
+  // Confirmed real-world failure (2026-08-26): a second hub-owner completed
+  // the LINE Login link and even got "sent successfully" from /test, but no
+  // message ever arrived - because that LINE account had never added this
+  // Official Account as a friend, which OAuth linking alone doesn't require
+  // or guarantee. A direct "add friend" link removes the "search for the
+  // bot yourself" step that was silently blocking delivery.
+  const [addFriendUrl, setAddFriendUrl] = useState(null);
   // Separate from `busy`/`error` above (connect/unlink) so a test push
   // doesn't disable/clash with those, and its own result reads as "test
   // sent" rather than a generic connection error.
@@ -64,6 +71,10 @@ export function LineNotifySettings({ open, onClose }) {
       .linePrefs()
       .then((saved) => setPrefs({ ...DEFAULT_PREFS, ...saved }))
       .catch(() => {}); // stays on DEFAULT_PREFS - matches the watchdog's own fallback
+    api
+      .lineBotInfo()
+      .then(({ addFriendUrl: url }) => setAddFriendUrl(url))
+      .catch(() => {}); // button just doesn't render - not fatal to the rest of this modal
     // The ?line=linked/error param has done its job the moment this modal
     // has read it - strip it so a page refresh doesn't keep re-showing a
     // stale result banner.
@@ -171,6 +182,20 @@ export function LineNotifySettings({ open, onClose }) {
           หรืออุปกรณ์ขาดการเชื่อมต่อ/เชื่อมต่อกลับมา (พร้อมเวลา)
         </p>
 
+        {addFriendUrl && (
+          <a
+            href={addFriendUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-2 rounded-xl bg-amber-50 p-3 text-xs font-semibold text-amber-800 hover:bg-amber-100"
+          >
+            <UserPlus className="size-4 shrink-0" />
+            <span>
+              ต้องเพิ่มเพื่อน LINE ก่อน ไม่งั้นจะไม่ได้รับข้อความแจ้งเตือน — <span className="underline">กดที่นี่เพื่อเพิ่มเพื่อน</span>
+            </span>
+          </a>
+        )}
+
         {status === null ? (
           <p className="text-xs text-[var(--muted-foreground)]">กำลังโหลด...</p>
         ) : status.linked ? (
@@ -229,11 +254,11 @@ export function LineNotifySettings({ open, onClose }) {
               </label>
               <label className="flex items-center gap-2 text-xs text-[var(--foreground)]">
                 <input type="checkbox" checked={prefs.remind1h} onChange={() => togglePref("remind1h")} className="size-3.5" />
-                แจ้งเตือนซ้ำทุก 1 ชม. (ถ้า % ค้างไม่เปลี่ยน)
+                แจ้งเตือนซ้ำทุก 1 ชม.
               </label>
               <label className="flex items-center gap-2 text-xs text-[var(--foreground)]">
                 <input type="checkbox" checked={prefs.remind2h} onChange={() => togglePref("remind2h")} className="size-3.5" />
-                แจ้งเตือนซ้ำทุก 2 ชม. (ถ้า % ค้างไม่เปลี่ยน)
+                แจ้งเตือนซ้ำทุก 2 ชม.
               </label>
               <label className="flex items-center gap-2 text-xs text-[var(--foreground)]">
                 <input type="checkbox" checked={prefs.step10} onChange={() => togglePref("step10")} className="size-3.5" />
