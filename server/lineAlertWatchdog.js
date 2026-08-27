@@ -71,7 +71,15 @@ function nowTimeLabel() {
 // instead of a bare single-cycle diff. In-memory, resets on restart - the
 // very first poll after a deploy has no prior value to compare against, so
 // it can never itself report "just went offline" (or "just came back").
-const STALE_AFTER_MS = 30_000;
+//
+// 30s (2x CHECK_INTERVAL_MS) still wasn't enough margin - confirmed by a
+// real 2026-08-26 flap: offline fired, reconnect fired exactly one 15s poll
+// later. That means the real quiet gap that triggered it was somewhere in
+// (30s, 45s] - right on top of the old threshold. Raised to 60s (4x
+// CHECK_INTERVAL_MS) for solid margin above that observed range - a real
+// disconnect still gets caught within about a minute, which is plenty fast
+// for a notification (not a safety-critical control loop).
+const STALE_AFTER_MS = 60_000;
 const lastSeenByDevice = new Map();
 function isDeviceStale(hubId, bmsKey, data) {
   const key = bmsKey ? `${hubId}/${bmsKey}` : hubId;
@@ -297,25 +305,25 @@ async function checkDevice(hubId, bmsKey, data, lineUserId) {
 
 // Per-hub notification preferences, per explicit request (2026-08-25) for a
 // checklist on the LINE settings page: "เลือกทั้งหมด" (select all), remind
-// every 1h/2h, weather (rain/sun only), fleet-average step 10%/20% - a flat
-// multi-select, not mutually-exclusive radios, so both step boxes (or both
-// reminder boxes) CAN be checked at once. Rather than run two independent
-// trackers in that case, this just takes the finer/shorter of whichever are
-// enabled (step: 20 is already a subset of every 10%-crossing point, so
-// enabling both is equivalent to just 10; reminder: the shorter interval
-// would always win the race anyway) - checking more boxes only ever
-// increases notification frequency, never decreases it, matching what a
-// user checking more boxes would expect. Stored at
-// JK_BMS_HUB/{hubId}/line_prefs (see routes/line.js) - same durable
-// Firebase placement as line_link, for the same ephemeral-Render-disk
-// reason. Defaults per explicit request (2026-08-26): remind1h + step20 +
-// weather on by default. wattLimit/chargeAmpLimit have no meaningful
-// default (0/unset means that alert is simply off until a hub owner sets
-// their own number - no one-size number makes sense across different
-// installations).
+// every 2h/3h (was 1h/2h until 2026-08-26's follow-up request), weather
+// (rain/sun only), fleet-average step 10%/20% - a flat multi-select, not
+// mutually-exclusive radios, so both step boxes (or both reminder boxes)
+// CAN be checked at once. Rather than run two independent trackers in that
+// case, this just takes the finer/shorter of whichever are enabled (step:
+// 20 is already a subset of every 10%-crossing point, so enabling both is
+// equivalent to just 10; reminder: the shorter interval would always win
+// the race anyway) - checking more boxes only ever increases notification
+// frequency, never decreases it, matching what a user checking more boxes
+// would expect. Stored at JK_BMS_HUB/{hubId}/line_prefs (see routes/line.js)
+// - same durable Firebase placement as line_link, for the same
+// ephemeral-Render-disk reason. Defaults: remind2h (now the shorter of the
+// two available options) + step20 + weather on by default.
+// wattLimit/chargeAmpLimit have no meaningful default (0/unset means that
+// alert is simply off until a hub owner sets their own number - no
+// one-size number makes sense across different installations).
 const DEFAULT_PREFS = {
-  remind1h: true,
-  remind2h: false,
+  remind2h: true,
+  remind3h: false,
   step10: false,
   step20: true,
   weatherEnabled: true,
@@ -325,7 +333,7 @@ const DEFAULT_PREFS = {
 function normalizePrefs(raw) {
   const p = { ...DEFAULT_PREFS, ...(raw && typeof raw === "object" ? raw : {}) };
   const steps = [p.step10 && 10, p.step20 && 20].filter(Boolean);
-  const reminderHours = [p.remind1h && 1, p.remind2h && 2].filter(Boolean);
+  const reminderHours = [p.remind2h && 2, p.remind3h && 3].filter(Boolean);
   return {
     step: steps.length ? Math.min(...steps) : null,
     reminderMs: reminderHours.length ? Math.min(...reminderHours) * 60 * 60 * 1000 : null,
@@ -408,6 +416,9 @@ async function checkWeather(hubId, location, lineUserId) {
 // the Ah figure being trustworthy in the notification text at all, so a
 // future glitch of the same shape can't produce a confusing-looking message
 // again even if it ever again affects the underlying sum.
+// Dead-band applied on top of each step boundary (see checkFleetAverage's
+// own comment on the specific flapping this fixes).
+const BIN_HYSTERESIS_PERCENT = 1;
 const lastNotifiedBinByHub = new Map();
 // If SOC sits still inside the same bin for a long time (e.g. parked at
 // 60% for hours), send one "still at X%" reminder every
@@ -428,10 +439,9 @@ async function checkFleetAverage(hubId, devices, lineUserId, prefs) {
   if (!prefs.step) return; // both step10/step20 disabled - feature off
 
   const soc = Math.max(0, Math.min(100, (remainingAh / capacityAh) * 100));
-  const bin = Math.floor(soc / prefs.step);
   const binKey = `${hubId}:${prefs.step}`;
   const prevBin = lastNotifiedBinByHub.get(binKey);
-  lastNotifiedBinByHub.set(binKey, bin);
+  const rawBin = Math.floor(soc / prefs.step);
 
   // Same convention BMSDashboard.jsx's "System Vol" tile already uses - the
   // packs are wired in parallel, so they share (near enough) one real
@@ -443,9 +453,28 @@ async function checkFleetAverage(hubId, devices, lineUserId, prefs) {
   if (prevBin === undefined) {
     // First observation ever (or since restart, or since this step size was
     // just enabled) - just seed both baselines, never fire on it.
+    lastNotifiedBinByHub.set(binKey, rawBin);
     lastFleetNotifyAtByHub.set(hubId, Date.now());
     return;
   }
+
+  // Hysteresis, per explicit report (2026-08-26): a plain floor(soc/step)
+  // committed every cycle flapped repeatedly when soc sat right on a step
+  // line (e.g. bouncing 79.6%/80.3%/79.8% around the 80% boundary for
+  // step20) - each tiny wobble crossed the exact integer line and fired a
+  // "increased"/"decreased" pair a minute apart, both rounding to the same
+  // displayed "80%". Moving OFF the currently-committed bin now requires
+  // soc to clear that bin's edge by BIN_HYSTERESIS_PERCENT, not just touch
+  // it - the bin (and lastNotifiedBinByHub) only updates when that margin is
+  // actually cleared, so small noise right at a boundary no longer commits
+  // a new bin at all, let alone notifies.
+  let bin = prevBin;
+  if (rawBin > prevBin && soc >= (prevBin + 1) * prefs.step + BIN_HYSTERESIS_PERCENT) {
+    bin = rawBin;
+  } else if (rawBin < prevBin && soc < prevBin * prefs.step - BIN_HYSTERESIS_PERCENT) {
+    bin = rawBin;
+  }
+  if (bin !== prevBin) lastNotifiedBinByHub.set(binKey, bin);
 
   if (bin !== prevBin) {
     const rising = bin > prevBin;
