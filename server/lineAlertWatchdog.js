@@ -2,6 +2,7 @@ import { db } from "./db.js";
 import { readPath } from "./firebaseRead.js";
 import { pushLineMessage, isLineMessagingConfigured } from "./lineNotify.js";
 import { isWeatherConfigured, fetchWeather } from "./weatherService.js";
+import { pick } from "../src/lib/pick.js";
 
 // Every 15s - prompt enough to catch a real battery event quickly without
 // hammering Firebase/LINE for something that isn't sub-second-sensitive
@@ -105,16 +106,37 @@ function isDeviceStale(hubId, bmsKey, data) {
 // called the moment it transitions from not-breached to breached (see
 // runCycle below) - never re-evaluated while already active, so its
 // wording doesn't need to handle a "still happening" phrasing.
+// Every status field read below goes through pick() rather than a bare
+// status.field access - confirmed real bug (2026-08-26): a device on newer
+// bridge firmware reports "soc" (camelCase) instead of "percent_remain"
+// (the older snake_case name), so a bare status.percent_remain silently
+// read as undefined -> defaulted to 0/100 in each check below -> a real 95%
+// battery could sit there full with zero LINE alerts firing, while the
+// Dashboard itself still showed 95% correctly because useBmsPackLive.js
+// already reads through the same pick(status, "soc", "percent_remain")
+// fallback this file now matches exactly (field order matters - "soc" is
+// checked first, matching the frontend's own precedence).
+// No blanket default here - each call site below applies whichever default
+// is "safe" for that specific check (missing data must never itself read as
+// a false "battery full" OR a false "battery empty"), matching the exact
+// per-condition defaults the original percent_remain-only code used.
+function socOf(status) {
+  return pick(status, "soc", "percent_remain");
+}
+function currentOf(status) {
+  return pick(status, "current", "charge_current") ?? 0;
+}
+
 const CONDITIONS = [
   {
     id: "cell_imbalance_50mv",
     check(status) {
-      const cells = (Array.isArray(status.cell_voltages) ? status.cell_voltages : []).filter((v) => v > 0);
+      const cells = (pick(status, "cellVoltages", "cell_voltages") ?? []).filter((v) => v > 0);
       const deltaV = typeof status.delta_cell_voltage === "number" ? status.delta_cell_voltage : cells.length ? Math.max(...cells) - Math.min(...cells) : 0;
       return deltaV * 1000 > 50;
     },
     message(status, settings, label) {
-      const cells = (Array.isArray(status.cell_voltages) ? status.cell_voltages : []).filter((v) => v > 0);
+      const cells = (pick(status, "cellVoltages", "cell_voltages") ?? []).filter((v) => v > 0);
       const deltaV = typeof status.delta_cell_voltage === "number" ? status.delta_cell_voltage : cells.length ? Math.max(...cells) - Math.min(...cells) : 0;
       return `⚠️ ${label}\nเซลล์มีแรงดันต่างกันเกิน 50mV (ปัจจุบัน ${(deltaV * 1000).toFixed(0)}mV)`;
     },
@@ -122,17 +144,17 @@ const CONDITIONS = [
   {
     id: "soc_near_full_95",
     check(status) {
-      const soc = status.percent_remain ?? 0;
+      const soc = socOf(status) ?? 0; // missing data must never read as "full"
       return soc >= 95 && soc < 100;
     },
     message(status, settings, label) {
-      return `🔋 ${label}\nแบตใกล้เต็มแล้ว (${(status.percent_remain ?? 0).toFixed(0)}%, ${(status.battery_voltage ?? 0).toFixed(2)}V)`;
+      return `🔋 ${label}\nแบตใกล้เต็มแล้ว (${(socOf(status) ?? 0).toFixed(0)}%, ${(status.battery_voltage ?? 0).toFixed(2)}V)`;
     },
   },
   {
     id: "soc_full_100",
     check(status) {
-      return (status.percent_remain ?? 0) >= 100;
+      return (socOf(status) ?? 0) >= 100;
     },
     message(status, settings, label) {
       return `🔋 ${label}\nแบตชาร์จเต็ม 100% แล้ว (${(status.battery_voltage ?? 0).toFixed(2)}V)`;
@@ -141,20 +163,20 @@ const CONDITIONS = [
   {
     id: "soc_near_empty_15",
     check(status) {
-      const soc = status.percent_remain ?? 100;
+      const soc = socOf(status) ?? 100; // missing data must never read as "empty"
       return soc <= 15 && soc > 10;
     },
     message(status, settings, label) {
-      return `🪫 ${label}\nแบตใกล้หมดแล้ว (${(status.percent_remain ?? 0).toFixed(0)}%, ${(status.battery_voltage ?? 0).toFixed(2)}V)`;
+      return `🪫 ${label}\nแบตใกล้หมดแล้ว (${(socOf(status) ?? 0).toFixed(0)}%, ${(status.battery_voltage ?? 0).toFixed(2)}V)`;
     },
   },
   {
     id: "soc_low_10",
     check(status) {
-      return (status.percent_remain ?? 100) <= 10;
+      return (socOf(status) ?? 100) <= 10; // missing data must never read as "empty"
     },
     message(status, settings, label) {
-      return `🪫 ${label}\nแบตเหลือน้อยมาก (${(status.percent_remain ?? 0).toFixed(0)}%, ${(status.battery_voltage ?? 0).toFixed(2)}V) กรุณาชาร์จโดยเร็ว`;
+      return `🪫 ${label}\nแบตเหลือน้อยมาก (${(socOf(status) ?? 0).toFixed(0)}%, ${(status.battery_voltage ?? 0).toFixed(2)}V) กรุณาชาร์จโดยเร็ว`;
     },
     // Per explicit request: unlike the other CONDITIONS (notify once on
     // breach, silent until recovery), a critically-low battery that just
@@ -165,49 +187,49 @@ const CONDITIONS = [
   {
     id: "charge_over_recommended",
     check(status, settings) {
-      const current = status.charge_current ?? 0;
+      const current = currentOf(status);
       const recommended = (settings.capacity ?? 0) * 0.25;
       return current > 0 && recommended > 0 && current > recommended;
     },
     message(status, settings, label) {
       const recommended = (settings.capacity ?? 0) * 0.25;
-      return `⚡ ${label}\nกระแสชาร์จเกินค่าที่แนะนำ (${status.charge_current.toFixed(1)}A > ${recommended.toFixed(1)}A)`;
+      return `⚡ ${label}\nกระแสชาร์จเกินค่าที่แนะนำ (${currentOf(status).toFixed(1)}A > ${recommended.toFixed(1)}A)`;
     },
   },
   {
     id: "charge_near_recommended",
     check(status, settings) {
-      const current = status.charge_current ?? 0;
+      const current = currentOf(status);
       const recommended = (settings.capacity ?? 0) * 0.25;
       return current > 0 && recommended > 0 && current >= recommended * NEAR_LIMIT_FRACTION && current <= recommended;
     },
     message(status, settings, label) {
       const recommended = (settings.capacity ?? 0) * 0.25;
-      return `⚡ ${label}\nกระแสชาร์จใกล้ถึงค่าที่แนะนำแล้ว (${status.charge_current.toFixed(1)}A ใกล้ ${recommended.toFixed(1)}A)`;
+      return `⚡ ${label}\nกระแสชาร์จใกล้ถึงค่าที่แนะนำแล้ว (${currentOf(status).toFixed(1)}A ใกล้ ${recommended.toFixed(1)}A)`;
     },
   },
   {
     id: "discharge_over_recommended",
     check(status, settings) {
-      const current = status.charge_current ?? 0;
+      const current = currentOf(status);
       const recommended = (settings.capacity ?? 0) * 0.5;
       return current < 0 && recommended > 0 && -current > recommended;
     },
     message(status, settings, label) {
       const recommended = (settings.capacity ?? 0) * 0.5;
-      return `⚡ ${label}\nใช้ไฟเกินค่าที่แนะนำ (${(-status.charge_current).toFixed(1)}A > ${recommended.toFixed(1)}A)`;
+      return `⚡ ${label}\nใช้ไฟเกินค่าที่แนะนำ (${(-currentOf(status)).toFixed(1)}A > ${recommended.toFixed(1)}A)`;
     },
   },
   {
     id: "discharge_near_recommended",
     check(status, settings) {
-      const current = status.charge_current ?? 0;
+      const current = currentOf(status);
       const recommended = (settings.capacity ?? 0) * 0.5;
       return current < 0 && recommended > 0 && -current >= recommended * NEAR_LIMIT_FRACTION && -current <= recommended;
     },
     message(status, settings, label) {
       const recommended = (settings.capacity ?? 0) * 0.5;
-      return `⚡ ${label}\nใช้ไฟใกล้ถึงค่าที่แนะนำแล้ว (${(-status.charge_current).toFixed(1)}A ใกล้ ${recommended.toFixed(1)}A)`;
+      return `⚡ ${label}\nใช้ไฟใกล้ถึงค่าที่แนะนำแล้ว (${(-currentOf(status)).toFixed(1)}A ใกล้ ${recommended.toFixed(1)}A)`;
     },
   },
 ];
@@ -433,7 +455,7 @@ async function checkFleetAverage(hubId, devices, lineUserId, prefs) {
   for (const { status } of devices) {
     remainingAh += status.capacity_remain || 0;
     capacityAh += status.nominal_capacity || 0;
-    current += status.charge_current || 0;
+    current += currentOf(status);
   }
   if (capacityAh <= 0) return; // nothing real to compute a % from yet
   if (!prefs.step) return; // both step10/step20 disabled - feature off
@@ -556,7 +578,7 @@ async function checkFleetChargeCurrent(hubId, devices, lineUserId, prefs) {
 
   let totalCurrent = 0;
   for (const { status } of devices) {
-    totalCurrent += status.charge_current || 0;
+    totalCurrent += currentOf(status);
   }
   const chargeAmps = totalCurrent > 0 ? totalCurrent : 0;
   const isBreached = chargeAmps > prefs.chargeAmpLimit;

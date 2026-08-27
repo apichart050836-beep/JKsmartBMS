@@ -13,7 +13,7 @@ import { ElectricGauge } from "../ElectricGauge.jsx";
 
 
 // Full-scale reading on the Power card's radial gauge, per explicit request.
-const POWER_GAUGE_MAX = 3500;
+const POWER_GAUGE_MAX = 4500;
 
 const HEALTH_TONE_TEXT = {
     excellent: "text-emerald-600",

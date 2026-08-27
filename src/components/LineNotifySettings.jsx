@@ -44,7 +44,7 @@ export function LineNotifySettings({ open, onClose }) {
   // doesn't disable/clash with those, and its own result reads as "test
   // sent" rather than a generic connection error.
   const [testBusy, setTestBusy] = useState(false);
-  const [testResult, setTestResult] = useState(null); // "ok" | "error" | null
+  const [testResult, setTestResult] = useState(null); // "ok" | {status:"error", message} | null
   // Pre-fetched the moment the modal opens (not inside handleConnect's own
   // click handler) - on iOS Safari especially, an `await` between a tap and
   // window.location.href breaks the "trusted user gesture" Universal Links
@@ -128,8 +128,14 @@ export function LineNotifySettings({ open, onClose }) {
     try {
       await api.lineTest();
       setTestResult("ok");
-    } catch {
-      setTestResult("error");
+    } catch (err) {
+      // Was previously swallowed entirely (bare `catch {}`), so every real
+      // failure - wrong token, invalid lineUserId, LINE API outage, actual
+      // not-a-friend rejection - all rendered the exact same generic
+      // "add friend" hint below, with no way to tell them apart. Now shows
+      // whatever routes/line.js's /test actually reported (which already
+      // forwards LINE's own error text - see lineNotify.js's pushLineMessage).
+      setTestResult({ status: "error", message: err.message || "ส่งไม่สำเร็จ" });
     } finally {
       setTestBusy(false);
     }
@@ -271,10 +277,11 @@ export function LineNotifySettings({ open, onClose }) {
                 ส่งข้อความทดสอบแล้ว ตรวจสอบแอป LINE ของคุณ
               </p>
             )}
-            {testResult === "error" && (
-              <p className="text-center text-[11px] font-semibold text-[var(--critical)]">
-                ส่งไม่สำเร็จ - ตรวจสอบว่าได้เพิ่มบัญชี LINE ทางการเป็นเพื่อนแล้ว
-              </p>
+            {testResult?.status === "error" && (
+              <div className="rounded-lg bg-[var(--critical-10)] p-2 text-center text-[11px] font-semibold text-[var(--critical)]">
+                <p>ส่งไม่สำเร็จ</p>
+                <p className="mt-0.5 font-mono text-[10px] font-normal">{testResult.message}</p>
+              </div>
             )}
 
             <div className="space-y-1.5 rounded-xl border border-[var(--border)] p-3">
