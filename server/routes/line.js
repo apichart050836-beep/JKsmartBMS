@@ -4,7 +4,8 @@ import { requireFirebase } from "../middleware/requireFirebase.js";
 import { db } from "../db.js";
 import { readPath, writePath } from "../firebaseRead.js";
 import { isLineLoginConfigured, signLinkState, verifyLinkState, buildLoginUrl, exchangeCodeForLineUserId } from "../lineAuth.js";
-import { pushLineMessage, getBotInfo } from "../lineNotify.js";
+import { pushLineMessage, replyLineMessage, getBotInfo, verifyWebhookSignature, isWebhookConfigured } from "../lineNotify.js";
+import { computeFleetSummary, isFleetCountable, nowTimeLabel } from "../lineAlertWatchdog.js";
 
 const router = Router();
 
@@ -48,6 +49,78 @@ async function detachOtherHubsLinkedTo(lineUserId, exceptHubId) {
     }
   }
 }
+
+// Reverse of the forward lookup everywhere else in this file (hubId ->
+// link) - the webhook below only ever gets the SENDER's lineUserId from
+// LINE, so it has to find which hub (if any) that real person is linked to.
+// Same whole-tree-scan cost class as detachOtherHubsLinkedTo above, and
+// only run per incoming message, not per poll cycle.
+async function findHubByLineUserId(lineUserId) {
+  const hubs = await readPath("JK_BMS_HUB");
+  if (!hubs || typeof hubs !== "object") return null;
+  for (const [hubId, hubData] of Object.entries(hubs)) {
+    if (hubData?.line_link?.lineUserId === lineUserId) return { hubId, hubData };
+  }
+  return null;
+}
+
+// The on-demand counterpart to lineAlertWatchdog.js's automatic fleet
+// average - built from the exact same computeFleetSummary formula so the
+// numbers always agree with what the automatic alerts already said.
+function buildStatusReply(hubData) {
+  const devices = Object.values(hubData).filter(isFleetCountable);
+  if (devices.length === 0) return "ยังไม่พบข้อมูลอุปกรณ์ BMS ในระบบ";
+  const { soc, remainingAh, capacityAh, current, voltage } = computeFleetSummary(devices);
+  if (soc === null) return "ยังไม่พบข้อมูลอุปกรณ์ BMS ในระบบ";
+  const currentLabel = current > 0 ? `+${current.toFixed(1)}` : current.toFixed(1);
+  return (
+    `🔋 สถานะแบตปัจจุบัน\n` +
+    `SOC: ${soc.toFixed(0)}% (${remainingAh.toFixed(1)}/${capacityAh.toFixed(1)}Ah)\n` +
+    `แรงดัน: ${voltage.toFixed(2)}V\n` +
+    `กระแส: ${currentLabel}A\n` +
+    `(${nowTimeLabel()})`
+  );
+}
+
+// LINE POSTs every incoming message/follow/etc event here - requires a
+// Webhook URL configured in the Messaging API channel's console settings
+// (https://<this app's deployed URL>/api/line/webhook) and
+// LINE_MESSAGING_CHANNEL_SECRET set (see lineNotify.js's comment on why
+// that's a different value from LINE_LOGIN_CHANNEL_SECRET). No requireAuth
+// here - LINE calls this directly, not a logged-in browser session;
+// verifyWebhookSignature is what proves the request is genuinely from LINE
+// instead of a session cookie. Only handles plain text messages - any other
+// event type (follow, sticker, image, ...) is acknowledged (200) and
+// otherwise ignored, per explicit scope: an on-demand status check, not a
+// general chatbot.
+router.post("/webhook", async (req, res) => {
+  if (!isWebhookConfigured) return res.status(503).end();
+  const signature = req.get("X-Line-Signature");
+  if (!req.rawBody || !verifyWebhookSignature(req.rawBody, signature)) {
+    return res.status(401).end();
+  }
+  // Ack immediately - LINE expects a fast 200 and doesn't wait on the
+  // reply itself (that goes out as its own separate API call below), so
+  // there's no reason to make LINE's webhook delivery wait on a Firebase
+  // read + reply push.
+  res.status(200).end();
+
+  const events = Array.isArray(req.body?.events) ? req.body.events : [];
+  for (const event of events) {
+    if (event.type !== "message" || event.message?.type !== "text") continue;
+    const replyToken = event.replyToken;
+    const senderId = event.source?.userId;
+    if (!replyToken || !senderId) continue;
+
+    try {
+      const found = await findHubByLineUserId(senderId);
+      const text = found ? buildStatusReply(found.hubData) : "บัญชีนี้ยังไม่ได้เชื่อมต่อกับระบบ กรุณาเชื่อมต่อผ่านเว็บ JK BMS Dashboard ก่อน";
+      await replyLineMessage(replyToken, text);
+    } catch (err) {
+      console.error(`LINE webhook reply failed: ${err.message}`);
+    }
+  }
+});
 
 // Where /callback sends the browser back to once linking succeeds/fails -
 // CLIENT_ORIGIN in local dev (separate Vite port from this backend), a

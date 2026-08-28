@@ -59,7 +59,12 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json());
+// `verify` stashes the raw bytes on req.rawBody alongside the normal parsed
+// req.body - needed by routes/line.js's /webhook to check LINE's HMAC
+// signature, which is computed over the exact raw request bytes (the parsed
+// JSON can't be re-serialized byte-identically, so this is the only
+// reliable way to get them). Harmless overhead for every other route.
+app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf; } }));
 app.use(cookieParser());
 
 // Routes หลักของระบบ

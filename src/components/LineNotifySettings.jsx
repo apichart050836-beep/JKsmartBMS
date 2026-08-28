@@ -17,7 +17,7 @@ import { api } from "../lib/apiClient.js";
 // is a number the hub owner has to set themselves, not a checkbox, so
 // they're kept out of PREFS_KEYS/"เลือกทั้งหมด" below.
 const DEFAULT_PREFS = {
-  remind2h: true,
+  remind2h: false,
   remind3h: false,
   step10: false,
   step20: true,

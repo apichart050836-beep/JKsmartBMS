@@ -32,7 +32,7 @@ function isBmsDevice(value) {
 // device disappearing and reappearing, swinging the average SOC by several
 // percent purely from the device count changing, not any real battery
 // movement.
-function isFleetCountable(value) {
+export function isFleetCountable(value) {
   return !!value && typeof value === "object" && value.status && typeof value.status === "object" && typeof value.status.nominal_capacity === "number";
 }
 
@@ -47,7 +47,7 @@ function deviceLabel(hubId, bmsKey, settings) {
 // until this was pinned down. Bangkok never observes DST, so this is
 // always correct with no seasonal adjustment needed (same reasoning
 // history.js's bangkokMs already documents).
-function nowTimeLabel() {
+export function nowTimeLabel() {
   return new Date().toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "Asia/Bangkok" });
 }
 
@@ -344,7 +344,7 @@ async function checkDevice(hubId, bmsKey, data, lineUserId) {
 // alert is simply off until a hub owner sets their own number - no
 // one-size number makes sense across different installations).
 const DEFAULT_PREFS = {
-  remind2h: true,
+  remind2h: false,
   remind3h: false,
   step10: false,
   step20: true,
@@ -448,7 +448,12 @@ const lastNotifiedBinByHub = new Map();
 // separately from the bin-cross timing so a real cross always resets the
 // reminder clock too (no double-notify right after a cross).
 const lastFleetNotifyAtByHub = new Map();
-async function checkFleetAverage(hubId, devices, lineUserId, prefs) {
+
+// Shared with routes/line.js's /webhook (the on-demand "เช็คสถานะ" reply
+// feature, 2026-08-26) so a status check answers with EXACTLY the same
+// numbers the automatic fleet-average alerts use - one formula, not two
+// copies that could quietly drift apart.
+export function computeFleetSummary(devices) {
   let remainingAh = 0;
   let capacityAh = 0;
   let current = 0;
@@ -457,19 +462,23 @@ async function checkFleetAverage(hubId, devices, lineUserId, prefs) {
     capacityAh += status.nominal_capacity || 0;
     current += currentOf(status);
   }
-  if (capacityAh <= 0) return; // nothing real to compute a % from yet
-  if (!prefs.step) return; // both step10/step20 disabled - feature off
-
-  const soc = Math.max(0, Math.min(100, (remainingAh / capacityAh) * 100));
-  const binKey = `${hubId}:${prefs.step}`;
-  const prevBin = lastNotifiedBinByHub.get(binKey);
-  const rawBin = Math.floor(soc / prefs.step);
-
+  const soc = capacityAh > 0 ? Math.max(0, Math.min(100, (remainingAh / capacityAh) * 100)) : null;
   // Same convention BMSDashboard.jsx's "System Vol" tile already uses - the
   // packs are wired in parallel, so they share (near enough) one real
   // voltage rather than summing, and the first live device's own reading is
   // the representative value (see its own comment on this exact tradeoff).
   const voltage = devices.find((d) => d.status?.battery_voltage > 0)?.status?.battery_voltage ?? 0;
+  return { soc, remainingAh, capacityAh, current, voltage };
+}
+
+async function checkFleetAverage(hubId, devices, lineUserId, prefs) {
+  const { soc, remainingAh, capacityAh, voltage } = computeFleetSummary(devices);
+  if (soc === null) return; // nothing real to compute a % from yet
+  if (!prefs.step) return; // both step10/step20 disabled - feature off
+
+  const binKey = `${hubId}:${prefs.step}`;
+  const prevBin = lastNotifiedBinByHub.get(binKey);
+  const rawBin = Math.floor(soc / prefs.step);
   const detail = `${voltage.toFixed(2)}V (${nowTimeLabel()})`;
 
   if (prevBin === undefined) {
