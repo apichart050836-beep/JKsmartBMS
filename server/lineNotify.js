@@ -30,11 +30,38 @@ if (!isLineMessagingConfigured) {
   );
 }
 
+// Tappable buttons shown above the user's keyboard, attached to a message -
+// shared by pushLineMessage AND replyLineMessage below (both default to
+// showing these) so the "just tap it" shortcuts are available after EITHER
+// an automatic alert or an on-demand reply, not just one of the two. Per
+// explicit follow-up (2026-08-26): Quick Reply buttons only ever appear on
+// the specific message they're attached to and vanish once the user does
+// anything else - there's no way to make them permanently visible without a
+// Rich Menu (a whole separate LINE feature needing an uploaded image +
+// console setup), so defaulting BOTH send paths to always include these is
+// the simplest way to make a button available as often as possible. Each
+// tap just SENDS the button's own text back through the webhook exactly as
+// if typed, re-triggering routes/line.js's matching reply - see that file's
+// buildStatusReply/buildWeatherReply/buildTempReply.
+export const QUICK_REPLY_ITEMS = [
+  { type: "action", action: { type: "message", label: "🔄 เช็คสถานะ", text: "เช็คสถานะ" } },
+  { type: "action", action: { type: "message", label: "☀️ เช็คสภาพอากาศ", text: "เช็คสภาพอากาศ" } },
+  // LINE caps quick-reply "label" (what shows on the button) at 20
+  // characters - "เช็คเซ็นเซอร์วัดอุณหภูมิ" alone is 24, so the full phrase
+  // only fits in "text" (the 300-char field actually sent/matched on tap,
+  // see routes/line.js's webhook), shortened just for the visible label.
+  { type: "action", action: { type: "message", label: "🌡️ เช็คอุณหภูมิ", text: "เช็คเซ็นเซอร์วัดอุณหภูมิ" } },
+];
+
 // Resolves once LINE has accepted the message. Callers should treat a
 // rejected promise as "this specific user did not get this message" (e.g.
 // they unfriended the bot) - never fatal to the watchdog cycle around it.
-export async function pushLineMessage(lineUserId, text) {
+// Pass quickReplyItems: null to send a plain message with no buttons (used
+// where there's nothing meaningful to tap yet).
+export async function pushLineMessage(lineUserId, text, quickReplyItems = QUICK_REPLY_ITEMS) {
   if (!isLineMessagingConfigured) throw new Error("LINE Messaging API not configured");
+  const message = { type: "text", text };
+  if (quickReplyItems?.length) message.quickReply = { items: quickReplyItems };
   const res = await fetch("https://api.line.me/v2/bot/message/push", {
     method: "POST",
     headers: {
@@ -43,7 +70,7 @@ export async function pushLineMessage(lineUserId, text) {
     },
     body: JSON.stringify({
       to: lineUserId,
-      messages: [{ type: "text", text }],
+      messages: [message],
     }),
   });
   if (!res.ok) {
@@ -59,8 +86,10 @@ export async function pushLineMessage(lineUserId, text) {
 // automatic battery alerts do, only to answer something the user just sent.
 // See routes/line.js's /webhook for the "เช็คสถานะ" on-demand feature this
 // exists for.
-export async function replyLineMessage(replyToken, text) {
+export async function replyLineMessage(replyToken, text, quickReplyItems = QUICK_REPLY_ITEMS) {
   if (!isLineMessagingConfigured) throw new Error("LINE Messaging API not configured");
+  const message = { type: "text", text };
+  if (quickReplyItems?.length) message.quickReply = { items: quickReplyItems };
   const res = await fetch("https://api.line.me/v2/bot/message/reply", {
     method: "POST",
     headers: {
@@ -69,7 +98,7 @@ export async function replyLineMessage(replyToken, text) {
     },
     body: JSON.stringify({
       replyToken,
-      messages: [{ type: "text", text }],
+      messages: [message],
     }),
   });
   if (!res.ok) {

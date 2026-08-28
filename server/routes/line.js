@@ -5,7 +5,8 @@ import { db } from "../db.js";
 import { readPath, writePath } from "../firebaseRead.js";
 import { isLineLoginConfigured, signLinkState, verifyLinkState, buildLoginUrl, exchangeCodeForLineUserId } from "../lineAuth.js";
 import { pushLineMessage, replyLineMessage, getBotInfo, verifyWebhookSignature, isWebhookConfigured } from "../lineNotify.js";
-import { computeFleetSummary, isFleetCountable, nowTimeLabel } from "../lineAlertWatchdog.js";
+import { computeFleetSummary, isFleetCountable, deviceLabel, nowTimeLabel } from "../lineAlertWatchdog.js";
+import { isWeatherConfigured, fetchWeather } from "../weatherService.js";
 
 const router = Router();
 
@@ -82,6 +83,79 @@ function buildStatusReply(hubData) {
   );
 }
 
+// Same nested-vs-flat hub shape handling runCycle uses (a hub either nests
+// devices under their own bmsKey, or - single-device hubs - IS the device
+// directly), reused here for the weather/temperature replies below so they
+// work the same way regardless of which shape a given hub has.
+function listFleetDevices(hubId, hubData) {
+  const entries = Object.entries(hubData).filter(([, v]) => isFleetCountable(v));
+  if (entries.length > 0) {
+    return entries.map(([bmsKey, data]) => ({ label: deviceLabel(hubId, bmsKey, data.settings), status: data.status }));
+  }
+  if (isFleetCountable(hubData)) {
+    return [{ label: deviceLabel(hubId, null, hubData.settings), status: hubData.status }];
+  }
+  return [];
+}
+
+// Same icon/condition set lineAlertWatchdog.js's checkWeather already
+// categorizes into rain/sun/other - here just for display, not filtering,
+// so every condition OpenWeatherMap can return gets a label.
+const WEATHER_ICON = { Clear: "☀️", Clouds: "☁️", Rain: "🌧️", Drizzle: "🌦️", Thunderstorm: "⛈️", Snow: "❄️", Mist: "🌫️", Fog: "🌫️", Haze: "🌫️" };
+const WEATHER_LABEL_TH = {
+  Clear: "ท้องฟ้าแจ่มใส",
+  Clouds: "มีเมฆ",
+  Rain: "ฝนตก",
+  Drizzle: "ฝนตกปรอยๆ",
+  Thunderstorm: "พายุฝนฟ้าคะนอง",
+  Snow: "หิมะตก",
+  Mist: "มีหมอก",
+  Fog: "มีหมอก",
+  Haze: "มีหมอกควัน",
+};
+// Reuses the exact same saved installation location the Dashboard's own
+// weather button reads (JK_BMS_HUB/{hubId}/location - see
+// useWeatherLocation.js) and the server-side OpenWeatherMap key
+// (server/weatherService.js - separate from the frontend's VITE_-prefixed
+// one for the same reason lineAlertWatchdog.js's checkWeather needs it).
+async function buildWeatherReply(hubData) {
+  if (!isWeatherConfigured()) return "ยังไม่ได้ตั้งค่า Weather API key ในระบบ (ติดต่อผู้ดูแลระบบ)";
+  const loc = hubData.location;
+  if (!loc?.lat || !loc?.lng) return "ยังไม่ได้ตั้งค่าตำแหน่งติดตั้ง กรุณาตั้งค่าผ่านปุ่มสภาพอากาศบนเว็บ JK BMS Dashboard ก่อน";
+  try {
+    const weather = await fetchWeather(loc.lat, loc.lng);
+    const icon = WEATHER_ICON[weather.condition] ?? "🌤️";
+    const label = WEATHER_LABEL_TH[weather.condition] ?? weather.condition;
+    const tempLabel = typeof weather.temperature === "number" ? ` ${weather.temperature.toFixed(0)}°C` : "";
+    return `${icon} สภาพอากาศ (${loc.name || weather.locationName})\n${label}${tempLabel}\n(${nowTimeLabel()})`;
+  } catch (err) {
+    console.error(`LINE weather reply failed: ${err.message}`);
+    return "โหลดข้อมูลสภาพอากาศไม่สำเร็จ";
+  }
+}
+
+// Same 5-channel set BMSDashboard.jsx's temperature tiles read (t1, t2, t4,
+// t5 deliberately skipping t3, plus the CMOS/MOSFET sensor) - reports each
+// device's HIGHEST reading and which channel it's from, not every channel,
+// to keep a LINE reply short even with several devices under one hub.
+function buildTempReply(hubId, hubData) {
+  const devices = listFleetDevices(hubId, hubData);
+  if (devices.length === 0) return "ยังไม่พบข้อมูลอุปกรณ์ BMS ในระบบ";
+  const lines = devices.map(({ label, status }) => {
+    const temps = [
+      ["T1", status.battery_t1],
+      ["T2", status.battery_t2],
+      ["T4", status.battery_t4],
+      ["T5", status.battery_t5],
+      ["CMOS", status.mos_temp],
+    ].filter(([, v]) => typeof v === "number");
+    if (temps.length === 0) return `${label}: ไม่มีข้อมูลอุณหภูมิ`;
+    const [maxLabel, maxVal] = temps.reduce((a, b) => (b[1] > a[1] ? b : a));
+    return `${label}: สูงสุด ${maxVal.toFixed(0)}°C (${maxLabel})`;
+  });
+  return `🌡️ ความร้อนเซ็นเซอร์\n${lines.join("\n")}\n(${nowTimeLabel()})`;
+}
+
 // LINE POSTs every incoming message/follow/etc event here - requires a
 // Webhook URL configured in the Messaging API channel's console settings
 // (https://<this app's deployed URL>/api/line/webhook) and
@@ -114,8 +188,24 @@ router.post("/webhook", async (req, res) => {
 
     try {
       const found = await findHubByLineUserId(senderId);
-      const text = found ? buildStatusReply(found.hubData) : "บัญชีนี้ยังไม่ได้เชื่อมต่อกับระบบ กรุณาเชื่อมต่อผ่านเว็บ JK BMS Dashboard ก่อน";
-      await replyLineMessage(replyToken, text);
+      if (!found) {
+        // No quick-reply buttons here (quickReplyItems: null) - nothing
+        // meaningful to tap until this account is actually linked.
+        await replyLineMessage(replyToken, "บัญชีนี้ยังไม่ได้เชื่อมต่อกับระบบ กรุณาเชื่อมต่อผ่านเว็บ JK BMS Dashboard ก่อน", null);
+        continue;
+      }
+      // Matches the exact text each quick-reply button sends - anything
+      // else (typed free-form, or a command that doesn't match) falls back
+      // to the status reply, same permissive default this had before the
+      // weather/temperature commands existed.
+      const text = event.message.text.trim();
+      let reply;
+      if (text === "เช็คสภาพอากาศ") reply = await buildWeatherReply(found.hubData);
+      else if (text === "เช็คเซ็นเซอร์วัดอุณหภูมิ") reply = buildTempReply(found.hubId, found.hubData);
+      else reply = buildStatusReply(found.hubData);
+      // No 3rd arg here - replyLineMessage already defaults to
+      // QUICK_REPLY_ITEMS (see lineNotify.js).
+      await replyLineMessage(replyToken, reply);
     } catch (err) {
       console.error(`LINE webhook reply failed: ${err.message}`);
     }

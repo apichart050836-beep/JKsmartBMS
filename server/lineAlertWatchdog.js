@@ -36,7 +36,7 @@ export function isFleetCountable(value) {
   return !!value && typeof value === "object" && value.status && typeof value.status === "object" && typeof value.status.nominal_capacity === "number";
 }
 
-function deviceLabel(hubId, bmsKey, settings) {
+export function deviceLabel(hubId, bmsKey, settings) {
   return settings?.my_custom_name || (bmsKey ? `${hubId}/${bmsKey}` : hubId);
 }
 
