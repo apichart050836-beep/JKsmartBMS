@@ -5,8 +5,8 @@ import { allowedHubIds } from "./hubAccess.js";
 import { onHubTreeUpdate } from "./hubTreeCache.js";
 import { isAllowedOrigin } from "./corsOrigin.js";
 
-// Watches a hub sub-path (or the whole tree if hubId is null/undefined) by
-// subscribing to the shared hubTreeCache's ticks instead of polling
+// Watches a single hub's sub-path by subscribing to the shared
+// hubTreeCache's ticks instead of polling
 // Firebase itself. Per explicit bandwidth-reduction request (2026-08-29):
 // this used to run its OWN independent 1s Firebase poll PER CALL - so N
 // connected sockets (N open dashboard tabs) meant N independent reads of
@@ -29,16 +29,57 @@ function watchPath(hubId, emit) {
   let lastJson = Symbol("unset");
 
   return onHubTreeUpdate((tree) => {
-    const data = hubId ? (tree?.[hubId] ?? null) : tree;
+    const data = tree?.[hubId] ?? null;
     const json = JSON.stringify(data);
     if (json === lastJson) return;
     lastJson = json;
     try {
       emit(data);
     } catch (err) {
-      console.error(`watchPath emit failed for ${hubId ?? "(whole tree)"}: ${err.message}`);
+      console.error(`watchPath emit failed for ${hubId}: ${err.message}`);
     }
   });
+}
+
+// Admin sessions ("hubs:all") used to get the WHOLE tree re-sent as one
+// blob on every change anywhere in it - per explicit bandwidth-reduction
+// follow-up (2026-08-29), with several hubs actively reporting telemetry,
+// SOMETHING changes almost every 1s tick, so that whole-tree diff almost
+// never actually matched two ticks in a row: an admin session was
+// effectively getting the full tree pushed over the socket roughly once a
+// second regardless of how much of it actually changed. This instead
+// dynamically watches each hub INDIVIDUALLY (same per-hub diffing the
+// non-admin branch below already had) and emits granular "hub:update"
+// events - HubDataContext.jsx's handler for that event already does an
+// incremental upsert, not a replace (see its own comment), so this needed
+// zero frontend changes. The hub ID SET itself can grow (a new account
+// signs up) or shrink over the life of a long-lived admin session, so this
+// re-diffs that set on every cache tick (cheap - just comparing a handful
+// of string keys) and starts/stops a `watchPath` per hub as needed.
+function watchAllHubs(socket) {
+  const hubWatchers = new Map(); // hubId -> its watchPath cleanup fn
+  const unsubscribeFromTree = onHubTreeUpdate((tree) => {
+    const currentIds = new Set(Object.keys(tree ?? {}));
+    for (const hubId of currentIds) {
+      if (hubWatchers.has(hubId)) continue;
+      hubWatchers.set(
+        hubId,
+        watchPath(hubId, (data) => {
+          socket.emit("hub:update", { hubId, data });
+        })
+      );
+    }
+    for (const [hubId, stopWatching] of hubWatchers) {
+      if (currentIds.has(hubId)) continue;
+      stopWatching();
+      hubWatchers.delete(hubId);
+      socket.emit("hub:update", { hubId, data: null }); // tells the client this hub is gone
+    }
+  });
+  return () => {
+    unsubscribeFromTree();
+    for (const stopWatching of hubWatchers.values()) stopWatching();
+  };
 }
 
 // Same role filtering as GET /api/hubs, but live: a non-admin socket only
@@ -75,11 +116,13 @@ export function attachRealtime(httpServer) {
     if (socket.user.role === "user") socket.join("role:user");
 
     if (allowed === null) {
-      cleanup.push(
-        watchPath(null, (data) => {
-          socket.emit("hubs:all", data ?? {});
-        })
-      );
+      // "hubs:list" itself is content-ignored by the frontend (see
+      // HubDataContext.jsx) - only used to flip `loaded` true immediately,
+      // same as the non-admin branch below, instead of waiting on the
+      // first per-hub "hub:update" (or forever, for an admin whose Firebase
+      // project happens to have zero hubs).
+      socket.emit("hubs:list", []);
+      cleanup.push(watchAllHubs(socket));
     } else {
       socket.emit("hubs:list", allowed);
       for (const hubId of allowed) {
