@@ -1,6 +1,6 @@
-import { readPath, canReadFirebase } from "./firebaseRead.js";
 import { db } from "./db.js";
 import { flattenHubs } from "../src/lib/flattenHubs.js";
+import { getCachedHubTree } from "./hubTreeCache.js";
 
 // Firebase only ever holds the current-moment status node, never history -
 // this is the one place that turns "now" into "over time" by writing a row
@@ -27,14 +27,7 @@ function insertSnapshot(hubId, bmsKey, ts, packVoltage, chargeCurrent, capacityR
 }
 
 async function snapshotOnce() {
-  if (!canReadFirebase) return;
-  let hubs;
-  try {
-    hubs = await readPath("JK_BMS_HUB");
-  } catch (err) {
-    console.error("telemetryLogger: failed to read JK_BMS_HUB", err);
-    return;
-  }
+  const hubs = getCachedHubTree();
   if (!hubs) return;
 
   const ts = Date.now();

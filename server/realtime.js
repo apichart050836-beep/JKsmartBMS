@@ -2,55 +2,43 @@ import { Server } from "socket.io";
 import { parse as parseCookie } from "cookie";
 import { COOKIE_NAME, verifySession } from "./auth.js";
 import { allowedHubIds } from "./hubAccess.js";
-import { readPath } from "./firebaseRead.js";
+import { onHubTreeUpdate } from "./hubTreeCache.js";
 import { isAllowedOrigin } from "./corsOrigin.js";
 
-// 1s - the power-flow and peak cards use this stream directly, so a new
-// Solar PV/Load maximum appears on the open dashboard without a visible lag.
-// Still a plain REST poll per watched path, not a real push - see the
-// .once()-vs-.on() reasoning below for why this stays polling-based rather
-// than switching to a live listener.
-const REST_POLL_MS = 1000;
-
-// Watches a single Firebase path and calls emit(data) whenever a poll
-// delivers something CHANGED. Always polls via readPath (Admin SDK
-// once()-with-timeout, REST fallback) rather than a persistent
-// adminDb.ref(...).on() listener - .once() reads are proven reliable in
-// this environment (extensively tested), but the one live attempt at a
-// persistent .on() listener broke every subsequent request on that same
-// socket connection (reproduced with a raw curl replay of the Engine.IO
-// handshake: the connect packet succeeds, the very next poll 502s).
+// Watches a hub sub-path (or the whole tree if hubId is null/undefined) by
+// subscribing to the shared hubTreeCache's ticks instead of polling
+// Firebase itself. Per explicit bandwidth-reduction request (2026-08-29):
+// this used to run its OWN independent 1s Firebase poll PER CALL - so N
+// connected sockets (N open dashboard tabs) meant N independent reads of
+// the same whole tree every second. Now every socket just slices its own
+// piece out of the ONE tree hubTreeCache already refreshes once a second
+// (see that module's own comment on why 1s and why .once()-polling rather
+// than a persistent listener - same constraints as before, just centralized
+// instead of duplicated per socket).
 //
-// Diffed against the last-sent snapshot (per explicit request to cut
-// bandwidth) - a real device's status barely changes between two 1s
-// polls most of the time, so re-emitting the exact same JSON every single
-// second was pure waste. `lastJson` starts as a Symbol (never equal to any
-// real JSON.stringify output, including "undefined" itself) so the very
-// first poll always emits regardless of what the path resolves to.
-function watchPath(path, emit) {
+// Diffed against the last-sent snapshot per socket+path (unchanged from
+// before this refactor) - a real device's status barely changes between two
+// 1s ticks most of the time, so re-emitting the exact same JSON every tick
+// is still pure waste even though the read itself is now free. `lastJson`
+// starts as a Symbol (never equal to any real JSON.stringify output,
+// including "undefined" itself) so the first tick after subscribing always
+// emits regardless of what the path resolves to - onHubTreeUpdate delivers
+// an immediate tick with whatever's already cached, so a socket that
+// connects between polls doesn't wait up to 1s for its first frame either.
+function watchPath(hubId, emit) {
   let lastJson = Symbol("unset");
 
-  async function poll() {
-    let data;
-    try {
-      data = await readPath(path);
-    } catch (err) {
-      console.error(`watchPath poll failed for ${path}: ${err.message}`);
-      return;
-    }
+  return onHubTreeUpdate((tree) => {
+    const data = hubId ? (tree?.[hubId] ?? null) : tree;
     const json = JSON.stringify(data);
     if (json === lastJson) return;
     lastJson = json;
     try {
-      await emit(data);
+      emit(data);
     } catch (err) {
-      console.error(`watchPath emit failed for ${path}: ${err.message}`);
+      console.error(`watchPath emit failed for ${hubId ?? "(whole tree)"}: ${err.message}`);
     }
-  }
-
-  poll();
-  const id = setInterval(poll, REST_POLL_MS);
-  return () => clearInterval(id);
+  });
 }
 
 // Same role filtering as GET /api/hubs, but live: a non-admin socket only
@@ -88,7 +76,7 @@ export function attachRealtime(httpServer) {
 
     if (allowed === null) {
       cleanup.push(
-        watchPath("JK_BMS_HUB", (data) => {
+        watchPath(null, (data) => {
           socket.emit("hubs:all", data ?? {});
         })
       );
@@ -96,7 +84,7 @@ export function attachRealtime(httpServer) {
       socket.emit("hubs:list", allowed);
       for (const hubId of allowed) {
         cleanup.push(
-          watchPath(`JK_BMS_HUB/${hubId}`, (data) => {
+          watchPath(hubId, (data) => {
             socket.emit("hub:update", { hubId, data });
           })
         );

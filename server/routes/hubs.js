@@ -2,7 +2,8 @@ import { Router } from "express";
 import { requireAuth } from "../middleware/requireAuth.js";
 import { requireFirebase } from "../middleware/requireFirebase.js";
 import { allowedHubIds, canAccessHub } from "../hubAccess.js";
-import { readPath, writePath } from "../firebaseRead.js";
+import { writePath } from "../firebaseRead.js";
+import { getCachedHubTree } from "../hubTreeCache.js";
 import { db } from "../db.js";
 
 const router = Router();
@@ -15,35 +16,30 @@ function devicePath(hubId, bmsKey) {
   return bmsKey ? `JK_BMS_HUB/${hubId}/${bmsKey}` : `JK_BMS_HUB/${hubId}`;
 }
 
-// One-shot snapshot (Socket.IO in realtime.js handles live updates) - role
-// filtering happens here at the read itself: a non-admin's Firebase reads
-// only ever touch the specific hub_id paths their account is linked to,
-// never the full JK_BMS_HUB root. Read-only, so this uses readPath (falls
-// back to public REST if the privileged Admin SDK key isn't set up yet) -
-// unlike the writes below, which always require the real key.
-router.get("/", requireAuth, async (req, res) => {
+// One-shot snapshot (Socket.IO in realtime.js handles live updates) - reads
+// the shared hubTreeCache (per explicit bandwidth-reduction request,
+// 2026-08-29) instead of its own fresh Firebase read per request, kept at
+// most 1s stale. Role filtering still happens here, server-side, before the
+// response goes out: a non-admin only ever receives the specific hub_id
+// paths their account is linked to, the same as before this change - the
+// whole tree is already sitting in this process's memory either way now
+// (the cache itself reads it for the live socket path), so filtering here
+// instead of at the Firebase read costs nothing extra and a non-admin
+// client still never receives another hub's data.
+router.get("/", requireAuth, (req, res) => {
   const allowed = allowedHubIds(req.user);
+  const tree = getCachedHubTree();
 
-  try {
-    if (allowed === null) {
-      const val = await readPath("JK_BMS_HUB");
-      return res.json({ hubs: val ?? {} });
-    }
-
-    const hubs = {};
-    for (const hubId of allowed) {
-      const val = await readPath(`JK_BMS_HUB/${hubId}`);
-      if (val != null) hubs[hubId] = val;
-    }
-    res.json({ hubs });
-  } catch (err) {
-    // readPath now times out instead of hanging forever, but Express 4
-    // still won't forward a rejected async handler to error middleware on
-    // its own - without this the request would just hang until the client
-    // gives up, exactly like the login hang this was modeled on.
-    console.error(`GET /api/hubs failed: ${err.message}`);
-    res.status(503).json({ error: "Could not read hub data" });
+  if (allowed === null) {
+    return res.json({ hubs: tree ?? {} });
   }
+
+  const hubs = {};
+  for (const hubId of allowed) {
+    const val = tree?.[hubId];
+    if (val != null) hubs[hubId] = val;
+  }
+  res.json({ hubs });
 });
 
 // Configuration panel writes (Charge/Discharge/Balancer/etc settings, device

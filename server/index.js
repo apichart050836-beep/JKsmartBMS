@@ -22,9 +22,15 @@ import { attachRealtime } from "./realtime.js";
 import { startTelemetryLogger } from "./telemetryLogger.js";
 import { startChargeWatchdog } from "./chargeWatchdog.js";
 import { startLineAlertWatchdog } from "./lineAlertWatchdog.js";
+import { startHubTreeCache } from "./hubTreeCache.js";
 import { isAllowedOrigin } from "./corsOrigin.js";
 
 migrate();
+// Started first - every watchdog below, plus routes/hubs.js and
+// realtime.js, all read the JK_BMS_HUB tree through this shared cache now
+// instead of polling Firebase independently (see hubTreeCache.js's own
+// comment for why).
+startHubTreeCache();
 startTelemetryLogger();
 startChargeWatchdog();
 startLineAlertWatchdog();

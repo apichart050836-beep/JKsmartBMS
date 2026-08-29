@@ -1,5 +1,6 @@
 import { db } from "./db.js";
-import { readPath, writePath } from "./firebaseRead.js";
+import { writePath } from "./firebaseRead.js";
+import { getCachedHubTree } from "./hubTreeCache.js";
 
 // Every 5 seconds, per explicit request (was 1 minute).
 const CHECK_INTERVAL_MS = 5_000;
@@ -183,7 +184,7 @@ async function checkDevice(hubId, bmsKey, data) {
 }
 
 async function runCycle() {
-  const hubs = await readPath("JK_BMS_HUB");
+  const hubs = getCachedHubTree();
   if (!hubs) return;
 
   for (const [hubId, hubData] of Object.entries(hubs)) {

@@ -1,8 +1,8 @@
 import { db } from "./db.js";
-import { readPath } from "./firebaseRead.js";
 import { pushLineMessage, isLineMessagingConfigured } from "./lineNotify.js";
 import { isWeatherConfigured, fetchWeather } from "./weatherService.js";
 import { pick } from "../src/lib/pick.js";
+import { getCachedHubTree } from "./hubTreeCache.js";
 
 // Every 15s - prompt enough to catch a real battery event quickly without
 // hammering Firebase/LINE for something that isn't sub-second-sensitive
@@ -612,16 +612,12 @@ async function runCycle() {
 
   // The link itself lives in Firebase now (JK_BMS_HUB/{hubId}/line_link,
   // not a SQLite table - see routes/line.js's own comment on why), so this
-  // reads the whole tree once and picks out whichever hubs have one - same
-  // cost class as chargeWatchdog.js's own whole-tree-per-cycle read, and
-  // actually fewer round-trips than the old per-hub SQLite-driven reads.
-  let allHubs;
-  try {
-    allHubs = await readPath("JK_BMS_HUB");
-  } catch (err) {
-    console.error(`[LineAlertWatchdog] whole-tree read failed: ${err.message}`);
-    return;
-  }
+  // reads the whole tree and picks out whichever hubs have one. Reads the
+  // shared hubTreeCache (per explicit bandwidth-reduction request,
+  // 2026-08-29) rather than its own readPath call - same tree
+  // chargeWatchdog.js/telemetryLogger.js/realtime.js all now share, kept at
+  // most 1s stale, well within what a 15s cycle already tolerated.
+  const allHubs = getCachedHubTree();
   if (!allHubs || typeof allHubs !== "object") return;
 
   for (const [hubId, hubData] of Object.entries(allHubs)) {
