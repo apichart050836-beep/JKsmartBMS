@@ -191,14 +191,15 @@ async function checkDevice(hubId, bmsKey, data, lineUserId) {
 // fleet-average step 20% (the old 10% alternative removed), plus the two
 // user-set numeric limits below. Stored at JK_BMS_HUB/{hubId}/line_prefs
 // (see routes/line.js) - same durable Firebase placement as line_link, for
-// the same ephemeral-Render-disk reason. wattLimit/chargeAmpLimit have no
-// meaningful default (0/unset means that alert is simply off until a hub
-// owner sets their own number - no one-size number makes sense across
-// different installations).
+// the same ephemeral-Render-disk reason. Per explicit request (2026-08-31):
+// remind3h/step20 default ON (fleet-average alerts); weatherEnabled +
+// wattLimit/chargeAmpLimit are the "เลือกติกได้" group - opt-in, off by
+// default, since a Watt/Amp limit or weather condition varies per
+// installation and there's no one-size default that makes sense.
 const DEFAULT_PREFS = {
-  remind3h: false,
+  remind3h: true,
   step20: true,
-  weatherEnabled: true,
+  weatherEnabled: false,
   wattLimit: 0,
   chargeAmpLimit: 0,
 };
