@@ -9,11 +9,6 @@ import { getCachedHubTree } from "./hubTreeCache.js";
 // the way live dashboard telemetry is (see realtime.js's 1s poll).
 const CHECK_INTERVAL_MS = 15_000;
 
-// "Near" a recommended charge/discharge current limit means within 10% of
-// it (>=90% of the limit but not over it yet) - a judgment call, not a
-// value the user specified; documented here so it's easy to retune later.
-const NEAR_LIMIT_FRACTION = 0.9;
-
 // Same real BLE-read shape check chargeWatchdog.js uses.
 function isBmsDevice(value) {
   return !!value && typeof value === "object" && value.status && typeof value.status === "object" && value.settings && typeof value.settings === "object";
@@ -51,55 +46,6 @@ export function nowTimeLabel() {
   return new Date().toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "Asia/Bangkok" });
 }
 
-// Same freshness SIGNAL useBmsPackLive.js's frontend Online/Offline badge
-// uses (confirmed live, BLE physically unplugged, 2026-07-27) - NOT
-// chargeWatchdog.js's own copy, which reads status.uptime_seconds and was
-// found to never actually fire here: the real field is info.uptime_seconds
-// (a sibling of status, not inside it). "Fresh this poll" means EITHER
-// info.uptime_seconds increased OR any field in status changed at all.
-//
-// But unlike an earlier version of this function, "fresh this poll" is NOT
-// by itself "online" - real Firebase writes are confirmed to be up to ~20s
-// apart even on a perfectly healthy device (same reasoning BMSDashboard.jsx's
-// own STALE_AFTER_MS is tuned around), while this watchdog polls every
-// CHECK_INTERVAL_MS=15s. Comparing only against the immediately-previous
-// poll made a single quiet 15s window look identical to a real disconnect,
-// firing an offline alert immediately followed by a reconnect alert the
-// next cycle it changed - exactly the repeated ~15s-apart flapping reported
-// 2026-08-25. Fixed by tracking elapsed time since the last real change
-// (lastChangedAt) and only calling it stale once that exceeds
-// STALE_AFTER_MS, mirroring BMSDashboard.jsx's own now-lastUpdateAt check
-// instead of a bare single-cycle diff. In-memory, resets on restart - the
-// very first poll after a deploy has no prior value to compare against, so
-// it can never itself report "just went offline" (or "just came back").
-//
-// 30s (2x CHECK_INTERVAL_MS) still wasn't enough margin - confirmed by a
-// real 2026-08-26 flap: offline fired, reconnect fired exactly one 15s poll
-// later. That means the real quiet gap that triggered it was somewhere in
-// (30s, 45s] - right on top of the old threshold. Raised to 60s (4x
-// CHECK_INTERVAL_MS) for solid margin above that observed range - a real
-// disconnect still gets caught within about a minute, which is plenty fast
-// for a notification (not a safety-critical control loop).
-const STALE_AFTER_MS = 60_000;
-const lastSeenByDevice = new Map();
-function isDeviceStale(hubId, bmsKey, data) {
-  const key = bmsKey ? `${hubId}/${bmsKey}` : hubId;
-  const uptime = data.info?.uptime_seconds;
-  const statusJson = JSON.stringify(data.status);
-  const now = Date.now();
-  const prev = lastSeenByDevice.get(key);
-
-  const uptimeIncreased = typeof uptime === "number" && (!prev || prev.uptime == null || uptime > prev.uptime);
-  const statusChanged = !prev || prev.statusJson !== statusJson;
-  const isFresh = uptimeIncreased || statusChanged;
-  const lastChangedAt = isFresh || !prev ? now : prev.lastChangedAt;
-
-  lastSeenByDevice.set(key, { uptime, statusJson, lastChangedAt });
-
-  if (!prev) return false;
-  return now - lastChangedAt > STALE_AFTER_MS;
-}
-
 // Each condition: `id` (for line_alert_state's PK + dedup), `check(status,
 // settings)` returning true/false for "currently breached", and
 // `message(status, settings, label)` building the Thai push text only
@@ -127,109 +73,18 @@ function currentOf(status) {
   return pick(status, "current", "charge_current") ?? 0;
 }
 
+// Per explicit request (2026-08-29): every other per-device condition
+// (cell imbalance, near-full/full, near-empty/low split into two, charge/
+// discharge over/near recommended - 9 entries total) was cut, leaving only
+// this one flat "battery remaining 15%" threshold.
 const CONDITIONS = [
   {
-    id: "cell_imbalance_50mv",
+    id: "soc_low_15",
     check(status) {
-      const cells = (pick(status, "cellVoltages", "cell_voltages") ?? []).filter((v) => v > 0);
-      const deltaV = typeof status.delta_cell_voltage === "number" ? status.delta_cell_voltage : cells.length ? Math.max(...cells) - Math.min(...cells) : 0;
-      return deltaV * 1000 > 50;
+      return (socOf(status) ?? 100) <= 15; // missing data must never read as "empty"
     },
     message(status, settings, label) {
-      const cells = (pick(status, "cellVoltages", "cell_voltages") ?? []).filter((v) => v > 0);
-      const deltaV = typeof status.delta_cell_voltage === "number" ? status.delta_cell_voltage : cells.length ? Math.max(...cells) - Math.min(...cells) : 0;
-      return `⚠️ ${label}\nเซลล์มีแรงดันต่างกันเกิน 50mV (ปัจจุบัน ${(deltaV * 1000).toFixed(0)}mV)`;
-    },
-  },
-  {
-    id: "soc_near_full_95",
-    check(status) {
-      const soc = socOf(status) ?? 0; // missing data must never read as "full"
-      return soc >= 95 && soc < 100;
-    },
-    message(status, settings, label) {
-      return `🔋 ${label}\nแบตใกล้เต็มแล้ว (${(socOf(status) ?? 0).toFixed(0)}%, ${(status.battery_voltage ?? 0).toFixed(2)}V)`;
-    },
-  },
-  {
-    id: "soc_full_100",
-    check(status) {
-      return (socOf(status) ?? 0) >= 100;
-    },
-    message(status, settings, label) {
-      return `🔋 ${label}\nแบตชาร์จเต็ม 100% แล้ว (${(status.battery_voltage ?? 0).toFixed(2)}V)`;
-    },
-  },
-  {
-    id: "soc_near_empty_15",
-    check(status) {
-      const soc = socOf(status) ?? 100; // missing data must never read as "empty"
-      return soc <= 15 && soc > 10;
-    },
-    message(status, settings, label) {
-      return `🪫 ${label}\nแบตใกล้หมดแล้ว (${(socOf(status) ?? 0).toFixed(0)}%, ${(status.battery_voltage ?? 0).toFixed(2)}V)`;
-    },
-  },
-  {
-    id: "soc_low_10",
-    check(status) {
-      return (socOf(status) ?? 100) <= 10; // missing data must never read as "empty"
-    },
-    message(status, settings, label) {
-      return `🪫 ${label}\nแบตเหลือน้อยมาก (${(socOf(status) ?? 0).toFixed(0)}%, ${(status.battery_voltage ?? 0).toFixed(2)}V) กรุณาชาร์จโดยเร็ว`;
-    },
-    // Per explicit request: unlike the other CONDITIONS (notify once on
-    // breach, silent until recovery), a critically-low battery that just
-    // sits there un-charged should keep reminding - once, then again every
-    // repeatMs while still breached, not just on the initial edge.
-    repeatMs: 60 * 60 * 1000,
-  },
-  {
-    id: "charge_over_recommended",
-    check(status, settings) {
-      const current = currentOf(status);
-      const recommended = (settings.capacity ?? 0) * 0.25;
-      return current > 0 && recommended > 0 && current > recommended;
-    },
-    message(status, settings, label) {
-      const recommended = (settings.capacity ?? 0) * 0.25;
-      return `⚡ ${label}\nกระแสชาร์จเกินค่าที่แนะนำ (${currentOf(status).toFixed(1)}A > ${recommended.toFixed(1)}A)`;
-    },
-  },
-  {
-    id: "charge_near_recommended",
-    check(status, settings) {
-      const current = currentOf(status);
-      const recommended = (settings.capacity ?? 0) * 0.25;
-      return current > 0 && recommended > 0 && current >= recommended * NEAR_LIMIT_FRACTION && current <= recommended;
-    },
-    message(status, settings, label) {
-      const recommended = (settings.capacity ?? 0) * 0.25;
-      return `⚡ ${label}\nกระแสชาร์จใกล้ถึงค่าที่แนะนำแล้ว (${currentOf(status).toFixed(1)}A ใกล้ ${recommended.toFixed(1)}A)`;
-    },
-  },
-  {
-    id: "discharge_over_recommended",
-    check(status, settings) {
-      const current = currentOf(status);
-      const recommended = (settings.capacity ?? 0) * 0.5;
-      return current < 0 && recommended > 0 && -current > recommended;
-    },
-    message(status, settings, label) {
-      const recommended = (settings.capacity ?? 0) * 0.5;
-      return `⚡ ${label}\nใช้ไฟเกินค่าที่แนะนำ (${(-currentOf(status)).toFixed(1)}A > ${recommended.toFixed(1)}A)`;
-    },
-  },
-  {
-    id: "discharge_near_recommended",
-    check(status, settings) {
-      const current = currentOf(status);
-      const recommended = (settings.capacity ?? 0) * 0.5;
-      return current < 0 && recommended > 0 && -current >= recommended * NEAR_LIMIT_FRACTION && -current <= recommended;
-    },
-    message(status, settings, label) {
-      const recommended = (settings.capacity ?? 0) * 0.5;
-      return `⚡ ${label}\nใช้ไฟใกล้ถึงค่าที่แนะนำแล้ว (${(-currentOf(status)).toFixed(1)}A ใกล้ ${recommended.toFixed(1)}A)`;
+      return `🪫 ${label}\nแบตเหลือ ${(socOf(status) ?? 0).toFixed(0)}% (${(status.battery_voltage ?? 0).toFixed(2)}V)`;
     },
   },
 ];
@@ -249,41 +104,10 @@ function setAlertState(hubId, bmsKey, conditionId, active) {
   ).run(hubId, bmsKey, conditionId, active, Date.now());
 }
 
-const OFFLINE_CONDITION_ID = "device_offline";
-
 async function checkDevice(hubId, bmsKey, data, lineUserId) {
   const { status, settings } = data;
   const bmsKeyNorm = bmsKey ?? "";
   const label = deviceLabel(hubId, bmsKey, settings);
-
-  // Offline/reconnect, per explicit request (with the time included) -
-  // checked and edge-triggered the same way as every other condition
-  // below, just driven by the uptime-staleness check instead of a
-  // threshold. While a device is offline its last-known status/settings
-  // are frozen, not live, so the other conditions are skipped entirely for
-  // this cycle rather than potentially re-alerting on stale numbers.
-  const stale = isDeviceStale(hubId, bmsKey, data);
-  const offlineRow = getAlertState(hubId, bmsKeyNorm, OFFLINE_CONDITION_ID);
-  const wasOffline = offlineRow ? !!offlineRow.active : false;
-  if (stale && !wasOffline) {
-    try {
-      await pushLineMessage(lineUserId, `📡 ${label}\nอุปกรณ์ขาดการเชื่อมต่อ (${nowTimeLabel()})`);
-    } catch (err) {
-      console.error(`[LineAlertWatchdog] push failed for ${label}/${OFFLINE_CONDITION_ID}: ${err.message}`);
-    }
-    setAlertState(hubId, bmsKeyNorm, OFFLINE_CONDITION_ID, 1);
-    return;
-  }
-  if (!stale && wasOffline) {
-    try {
-      await pushLineMessage(lineUserId, `📡 ${label}\nอุปกรณ์เชื่อมต่อกลับมาแล้ว (${nowTimeLabel()})`);
-    } catch (err) {
-      console.error(`[LineAlertWatchdog] push failed for ${label}/reconnect: ${err.message}`);
-    }
-    setAlertState(hubId, bmsKeyNorm, OFFLINE_CONDITION_ID, 0);
-  } else if (stale) {
-    return; // still offline, already notified - skip the rest while data is frozen
-  }
 
   for (const condition of CONDITIONS) {
     let isBreached;
@@ -325,28 +149,18 @@ async function checkDevice(hubId, bmsKey, data, lineUserId) {
   }
 }
 
-// Per-hub notification preferences, per explicit request (2026-08-25) for a
-// checklist on the LINE settings page: "เลือกทั้งหมด" (select all), remind
-// every 2h/3h (was 1h/2h until 2026-08-26's follow-up request), weather
-// (rain/sun only), fleet-average step 10%/20% - a flat multi-select, not
-// mutually-exclusive radios, so both step boxes (or both reminder boxes)
-// CAN be checked at once. Rather than run two independent trackers in that
-// case, this just takes the finer/shorter of whichever are enabled (step:
-// 20 is already a subset of every 10%-crossing point, so enabling both is
-// equivalent to just 10; reminder: the shorter interval would always win
-// the race anyway) - checking more boxes only ever increases notification
-// frequency, never decreases it, matching what a user checking more boxes
-// would expect. Stored at JK_BMS_HUB/{hubId}/line_prefs (see routes/line.js)
-// - same durable Firebase placement as line_link, for the same
-// ephemeral-Render-disk reason. Defaults: remind2h (now the shorter of the
-// two available options) + step20 + weather on by default.
-// wattLimit/chargeAmpLimit have no meaningful default (0/unset means that
-// alert is simply off until a hub owner sets their own number - no
-// one-size number makes sense across different installations).
+// Per-hub notification preferences, checklist on the LINE settings page.
+// Per explicit request (2026-08-29), trimmed down to exactly: remind every
+// 3h (the old 1h/2h alternatives removed), weather (rain/sun only),
+// fleet-average step 20% (the old 10% alternative removed), plus the two
+// user-set numeric limits below. Stored at JK_BMS_HUB/{hubId}/line_prefs
+// (see routes/line.js) - same durable Firebase placement as line_link, for
+// the same ephemeral-Render-disk reason. wattLimit/chargeAmpLimit have no
+// meaningful default (0/unset means that alert is simply off until a hub
+// owner sets their own number - no one-size number makes sense across
+// different installations).
 const DEFAULT_PREFS = {
-  remind2h: false,
   remind3h: false,
-  step10: false,
   step20: true,
   weatherEnabled: true,
   wattLimit: 0,
@@ -354,11 +168,9 @@ const DEFAULT_PREFS = {
 };
 function normalizePrefs(raw) {
   const p = { ...DEFAULT_PREFS, ...(raw && typeof raw === "object" ? raw : {}) };
-  const steps = [p.step10 && 10, p.step20 && 20].filter(Boolean);
-  const reminderHours = [p.remind2h && 2, p.remind3h && 3].filter(Boolean);
   return {
-    step: steps.length ? Math.min(...steps) : null,
-    reminderMs: reminderHours.length ? Math.min(...reminderHours) * 60 * 60 * 1000 : null,
+    step: p.step20 ? 20 : null,
+    reminderMs: p.remind3h ? 3 * 60 * 60 * 1000 : null,
     weatherEnabled: !!p.weatherEnabled,
     wattLimit: typeof p.wattLimit === "number" && p.wattLimit > 0 ? p.wattLimit : null,
     chargeAmpLimit: typeof p.chargeAmpLimit === "number" && p.chargeAmpLimit > 0 ? p.chargeAmpLimit : null,
@@ -474,7 +286,7 @@ export function computeFleetSummary(devices) {
 async function checkFleetAverage(hubId, devices, lineUserId, prefs) {
   const { soc, remainingAh, capacityAh, voltage } = computeFleetSummary(devices);
   if (soc === null) return; // nothing real to compute a % from yet
-  if (!prefs.step) return; // both step10/step20 disabled - feature off
+  if (!prefs.step) return; // step20 disabled - feature off
 
   const binKey = `${hubId}:${prefs.step}`;
   const prevBin = lastNotifiedBinByHub.get(binKey);
@@ -524,7 +336,7 @@ async function checkFleetAverage(hubId, devices, lineUserId, prefs) {
     return;
   }
 
-  if (!prefs.reminderMs) return; // both remind1h/remind2h disabled - no repeat reminder
+  if (!prefs.reminderMs) return; // remind3h disabled - no repeat reminder
 
   // Same bin as last time - only remind once prefs.reminderMs has passed
   // since the last notification (cross or reminder alike).

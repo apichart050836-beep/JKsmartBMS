@@ -6,10 +6,10 @@ import { api } from "../lib/apiClient.js";
 
 // Personal LINE push notifications (explicit request) - lets this hub's
 // owner link their own LINE account (via LINE Login OAuth, server/
-// lineAuth.js) so lineAlertWatchdog.js has somewhere to push the 9 battery
-// condition alerts to (cell imbalance, SOC thresholds, charge/discharge
-// current thresholds - see that file's CONDITIONS list for the exact
-// wording/thresholds).
+// lineAuth.js) so lineAlertWatchdog.js has somewhere to push alerts to.
+// Trimmed down (2026-08-29) to exactly: battery remaining 15%, fleet-average
+// step 20%, weather (rain/sun only), and the two user-set numeric limits -
+// see that file's CONDITIONS list and DEFAULT_PREFS for the exact wording.
 // Defaults mirror lineAlertWatchdog.js's DEFAULT_PREFS exactly - shown here
 // before the real saved value has loaded (or for a hub that's never saved
 // any prefs yet) so the checklist doesn't flash as all-unchecked first.
@@ -17,15 +17,13 @@ import { api } from "../lib/apiClient.js";
 // is a number the hub owner has to set themselves, not a checkbox, so
 // they're kept out of PREFS_KEYS/"เลือกทั้งหมด" below.
 const DEFAULT_PREFS = {
-  remind2h: false,
   remind3h: false,
-  step10: false,
   step20: true,
   weatherEnabled: true,
   wattLimit: 0,
   chargeAmpLimit: 0,
 };
-const PREFS_KEYS = ["remind2h", "remind3h", "step10", "step20", "weatherEnabled"];
+const PREFS_KEYS = ["remind3h", "step20", "weatherEnabled"];
 
 export function LineNotifySettings({ open, onClose }) {
   const [status, setStatus] = useState(null); // { linked, linkedAt } | null while loading
@@ -218,8 +216,7 @@ export function LineNotifySettings({ open, onClose }) {
         )}
 
         <p className="text-xs text-[var(--muted-foreground)]">
-          รับแจ้งเตือนส่วนตัวผ่าน LINE เมื่อเซลล์แรงดันต่างกันเกิน 50mV, แบตใกล้เต็ม/เต็ม, แบตใกล้หมด/หมด, กระแสชาร์จ/ใช้ไฟเกินค่าที่แนะนำ,
-          หรืออุปกรณ์ขาดการเชื่อมต่อ/เชื่อมต่อกลับมา (พร้อมเวลา)
+          รับแจ้งเตือนส่วนตัวผ่าน LINE เมื่อแบตเหลือ 15% - เลือกแจ้งเตือนเพิ่มเติมได้ด้านล่าง
         </p>
 
         {addFriendUrl && (
@@ -294,16 +291,8 @@ export function LineNotifySettings({ open, onClose }) {
                 เลือกทั้งหมด
               </label>
               <label className="flex items-center gap-2 text-xs text-[var(--foreground)]">
-                <input type="checkbox" checked={prefs.remind2h} onChange={() => togglePref("remind2h")} className="size-3.5" />
-                แจ้งเตือนซ้ำทุก 2 ชม.
-              </label>
-              <label className="flex items-center gap-2 text-xs text-[var(--foreground)]">
                 <input type="checkbox" checked={prefs.remind3h} onChange={() => togglePref("remind3h")} className="size-3.5" />
                 แจ้งเตือนซ้ำทุก 3 ชม.
-              </label>
-              <label className="flex items-center gap-2 text-xs text-[var(--foreground)]">
-                <input type="checkbox" checked={prefs.step10} onChange={() => togglePref("step10")} className="size-3.5" />
-                แจ้งเตือนเพิ่มหรือลดทุก 10%
               </label>
               <label className="flex items-center gap-2 text-xs text-[var(--foreground)]">
                 <input type="checkbox" checked={prefs.step20} onChange={() => togglePref("step20")} className="size-3.5" />
