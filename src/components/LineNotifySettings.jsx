@@ -21,11 +21,13 @@ import { api } from "../lib/apiClient.js";
 const DEFAULT_PREFS = {
   remind3h: true,
   step20: true,
+  fleetLow15: true,
+  fleetNearFull95: true,
   weatherEnabled: false,
   wattLimit: 0,
   chargeAmpLimit: 0,
 };
-const PREFS_KEYS = ["remind3h", "step20", "weatherEnabled"];
+const PREFS_KEYS = ["remind3h", "step20", "fleetLow15", "fleetNearFull95", "weatherEnabled"];
 
 export function LineNotifySettings({ open, onClose }) {
   const [status, setStatus] = useState(null); // { linked, linkedAt } | null while loading
@@ -299,6 +301,24 @@ export function LineNotifySettings({ open, onClose }) {
               <label className="flex items-center gap-2 text-xs text-[var(--foreground)]">
                 <input type="checkbox" checked={prefs.step20} onChange={() => togglePref("step20")} className="size-3.5" />
                 แจ้งเตือนเพิ่มหรือลดทุก 20%
+              </label>
+              <label className="flex items-center gap-2 text-xs text-[var(--foreground)]">
+                <input
+                  type="checkbox"
+                  checked={prefs.fleetLow15}
+                  onChange={() => togglePref("fleetLow15")}
+                  className="size-3.5"
+                />
+                แจ้งเตือนแบตเฉลี่ยเหลือน้อย 15%
+              </label>
+              <label className="flex items-center gap-2 text-xs text-[var(--foreground)]">
+                <input
+                  type="checkbox"
+                  checked={prefs.fleetNearFull95}
+                  onChange={() => togglePref("fleetNearFull95")}
+                  className="size-3.5"
+                />
+                แจ้งเตือนแบตเฉลี่ยใกล้เต็ม 95%
               </label>
               <label className="flex items-center gap-2 text-xs text-[var(--foreground)]">
                 <input

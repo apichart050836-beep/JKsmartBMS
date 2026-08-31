@@ -33,7 +33,7 @@ function lineLinkPath(hubId) {
 function linePrefsPath(hubId) {
   return `JK_BMS_HUB/${hubId}/line_prefs`;
 }
-const PREFS_BOOL_KEYS = ["remind3h", "step20", "weatherEnabled"];
+const PREFS_BOOL_KEYS = ["remind3h", "step20", "fleetLow15", "fleetNearFull95", "weatherEnabled"];
 
 // Strict 1-account-to-1-LINE in BOTH directions (per explicit request) - a
 // real LINE account must never end up receiving another hub's BMS alerts.

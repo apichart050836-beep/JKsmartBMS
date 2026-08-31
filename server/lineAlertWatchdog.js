@@ -188,17 +188,22 @@ async function checkDevice(hubId, bmsKey, data, lineUserId) {
 // Per-hub notification preferences, checklist on the LINE settings page.
 // Per explicit request (2026-08-29), trimmed down to exactly: remind every
 // 3h (the old 1h/2h alternatives removed), weather (rain/sun only),
-// fleet-average step 20% (the old 10% alternative removed), plus the two
-// user-set numeric limits below. Stored at JK_BMS_HUB/{hubId}/line_prefs
-// (see routes/line.js) - same durable Firebase placement as line_link, for
-// the same ephemeral-Render-disk reason. Per explicit request (2026-08-31):
-// remind3h/step20 default ON (fleet-average alerts); weatherEnabled +
-// wattLimit/chargeAmpLimit are the "เลือกติกได้" group - opt-in, off by
-// default, since a Watt/Amp limit or weather condition varies per
-// installation and there's no one-size default that makes sense.
+// fleet-average step 20% (the old 10% alternative removed), fleet-average
+// low-15%/near-full-95% thresholds (added 2026-08-31 - same idea as the
+// per-device soc_low_15/soc_near_full_95 CONDITIONS, but against the
+// aggregated fleet SOC instead of one device), plus the two user-set
+// numeric limits below. Stored at JK_BMS_HUB/{hubId}/line_prefs (see
+// routes/line.js) - same durable Firebase placement as line_link, for the
+// same ephemeral-Render-disk reason. remind3h/step20/fleetLow15/
+// fleetNearFull95 default ON (all part of the fleet-average section);
+// weatherEnabled + wattLimit/chargeAmpLimit are the "เลือกติกได้" group -
+// opt-in, off by default, since those vary per installation and there's no
+// one-size default that makes sense.
 const DEFAULT_PREFS = {
   remind3h: true,
   step20: true,
+  fleetLow15: true,
+  fleetNearFull95: true,
   weatherEnabled: false,
   wattLimit: 0,
   chargeAmpLimit: 0,
@@ -208,6 +213,8 @@ function normalizePrefs(raw) {
   return {
     step: p.step20 ? 20 : null,
     reminderMs: p.remind3h ? 3 * 60 * 60 * 1000 : null,
+    fleetLow15: !!p.fleetLow15,
+    fleetNearFull95: !!p.fleetNearFull95,
     weatherEnabled: !!p.weatherEnabled,
     wattLimit: typeof p.wattLimit === "number" && p.wattLimit > 0 ? p.wattLimit : null,
     chargeAmpLimit: typeof p.chargeAmpLimit === "number" && p.chargeAmpLimit > 0 ? p.chargeAmpLimit : null,
@@ -389,6 +396,53 @@ async function checkFleetAverage(hubId, devices, lineUserId, prefs) {
   lastFleetNotifyAtByHub.set(hubId, Date.now());
 }
 
+// Fleet-average low-15%/near-full-95% alerts, per explicit request
+// (2026-08-31) - same idea as the per-device soc_low_15/soc_near_full_95
+// CONDITIONS, but against the aggregated fleet SOC (computeFleetSummary)
+// instead of one device's own reading, and each independently toggleable
+// via prefs (unlike the per-device ones, which are always on). Edge-
+// triggered through line_alert_state (hub-scoped, bmsKey=""), same simple
+// breach/recover boolean shape as the Watt/Amp alerts below.
+const FLEET_LOW_15_CONDITION_ID = "fleet_soc_low_15";
+const FLEET_NEAR_FULL_95_CONDITION_ID = "fleet_soc_near_full_95";
+async function checkFleetThresholds(hubId, devices, lineUserId, prefs) {
+  const { soc, voltage } = computeFleetSummary(devices);
+  if (soc === null) return;
+  const detail = `(${soc.toFixed(0)}%, ${voltage.toFixed(2)}V) (${nowTimeLabel()})`;
+
+  if (prefs.fleetLow15) {
+    const isBreached = soc <= 15;
+    const row = getAlertState(hubId, "", FLEET_LOW_15_CONDITION_ID);
+    const wasActive = row ? !!row.active : false;
+    if (isBreached && !wasActive) {
+      try {
+        await pushLineMessage(lineUserId, `🪫 แบตเฉลี่ยทั้งระบบเหลือน้อย ${detail}`);
+      } catch (err) {
+        console.error(`[LineAlertWatchdog] fleet low-15 push failed for ${hubId}: ${err.message}`);
+      }
+      setAlertState(hubId, "", FLEET_LOW_15_CONDITION_ID, 1);
+    } else if (!isBreached && wasActive) {
+      setAlertState(hubId, "", FLEET_LOW_15_CONDITION_ID, 0);
+    }
+  }
+
+  if (prefs.fleetNearFull95) {
+    const isBreached = soc >= 95 && soc < 100;
+    const row = getAlertState(hubId, "", FLEET_NEAR_FULL_95_CONDITION_ID);
+    const wasActive = row ? !!row.active : false;
+    if (isBreached && !wasActive) {
+      try {
+        await pushLineMessage(lineUserId, `🔋 แบตเฉลี่ยทั้งระบบใกล้เต็มแล้ว ${detail}`);
+      } catch (err) {
+        console.error(`[LineAlertWatchdog] fleet near-full-95 push failed for ${hubId}: ${err.message}`);
+      }
+      setAlertState(hubId, "", FLEET_NEAR_FULL_95_CONDITION_ID, 1);
+    } else if (!isBreached && wasActive) {
+      setAlertState(hubId, "", FLEET_NEAR_FULL_95_CONDITION_ID, 0);
+    }
+  }
+}
+
 // User-configurable Watt-usage alert, per explicit request (2026-08-26) -
 // "การใช้งาน" (usage/load draw) means net DISCHARGE power, matching this
 // codebase's established sign convention (negative current/power =
@@ -502,6 +556,9 @@ async function runCycle() {
     if (fleetDevices.length > 0) {
       await checkFleetAverage(hubId, fleetDevices, lineUserId, prefs).catch((err) =>
         console.error(`[LineAlertWatchdog] fleet average for ${hubId} failed: ${err.message}`)
+      );
+      await checkFleetThresholds(hubId, fleetDevices, lineUserId, prefs).catch((err) =>
+        console.error(`[LineAlertWatchdog] fleet thresholds for ${hubId} failed: ${err.message}`)
       );
       await checkFleetPower(hubId, fleetDevices, lineUserId, prefs).catch((err) =>
         console.error(`[LineAlertWatchdog] fleet watt for ${hubId} failed: ${err.message}`)
