@@ -73,11 +73,23 @@ function currentOf(status) {
   return pick(status, "current", "charge_current") ?? 0;
 }
 
-// Per explicit request (2026-08-29): every other per-device condition
-// (cell imbalance, near-full/full, near-empty/low split into two, charge/
-// discharge over/near recommended - 9 entries total) was cut, leaving only
-// this one flat "battery remaining 15%" threshold.
+// Per explicit request (2026-08-29): cut down from the original 9 to these
+// 4 - cell imbalance, full 100%, near-empty-15/low-10 (merged into the one
+// flat "battery remaining 15%" below), and the "near" charge/discharge
+// variants (charge_near_recommended/discharge_near_recommended) were all
+// removed; near-full 95% and the "over" charge/discharge variants were
+// explicitly asked to stay.
 const CONDITIONS = [
+  {
+    id: "soc_near_full_95",
+    check(status) {
+      const soc = socOf(status) ?? 0; // missing data must never read as "full"
+      return soc >= 95 && soc < 100;
+    },
+    message(status, settings, label) {
+      return `🔋 ${label}\nแบตใกล้เต็มแล้ว (${(socOf(status) ?? 0).toFixed(0)}%, ${(status.battery_voltage ?? 0).toFixed(2)}V)`;
+    },
+  },
   {
     id: "soc_low_15",
     check(status) {
@@ -85,6 +97,30 @@ const CONDITIONS = [
     },
     message(status, settings, label) {
       return `🪫 ${label}\nแบตเหลือ ${(socOf(status) ?? 0).toFixed(0)}% (${(status.battery_voltage ?? 0).toFixed(2)}V)`;
+    },
+  },
+  {
+    id: "charge_over_recommended",
+    check(status, settings) {
+      const current = currentOf(status);
+      const recommended = (settings.capacity ?? 0) * 0.25;
+      return current > 0 && recommended > 0 && current > recommended;
+    },
+    message(status, settings, label) {
+      const recommended = (settings.capacity ?? 0) * 0.25;
+      return `⚡ ${label}\nกระแสชาร์จเกินค่าที่แนะนำ (${currentOf(status).toFixed(1)}A > ${recommended.toFixed(1)}A)`;
+    },
+  },
+  {
+    id: "discharge_over_recommended",
+    check(status, settings) {
+      const current = currentOf(status);
+      const recommended = (settings.capacity ?? 0) * 0.5;
+      return current < 0 && recommended > 0 && -current > recommended;
+    },
+    message(status, settings, label) {
+      const recommended = (settings.capacity ?? 0) * 0.5;
+      return `⚡ ${label}\nใช้ไฟเกินค่าที่แนะนำ (${(-currentOf(status)).toFixed(1)}A > ${recommended.toFixed(1)}A)`;
     },
   },
 ];

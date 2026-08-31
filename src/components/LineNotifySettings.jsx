@@ -7,7 +7,9 @@ import { api } from "../lib/apiClient.js";
 // Personal LINE push notifications (explicit request) - lets this hub's
 // owner link their own LINE account (via LINE Login OAuth, server/
 // lineAuth.js) so lineAlertWatchdog.js has somewhere to push alerts to.
-// Trimmed down (2026-08-29) to exactly: battery remaining 15%, fleet-average
+// Trimmed down (2026-08-29) from 9 per-device conditions to 4 (near-full
+// 95%, battery remaining 15%, charge/discharge over recommended - explicit
+// follow-up kept these two after an initial over-trim), plus fleet-average
 // step 20%, weather (rain/sun only), and the two user-set numeric limits -
 // see that file's CONDITIONS list and DEFAULT_PREFS for the exact wording.
 // Defaults mirror lineAlertWatchdog.js's DEFAULT_PREFS exactly - shown here
@@ -216,7 +218,7 @@ export function LineNotifySettings({ open, onClose }) {
         )}
 
         <p className="text-xs text-[var(--muted-foreground)]">
-          รับแจ้งเตือนส่วนตัวผ่าน LINE เมื่อแบตเหลือ 15% - เลือกแจ้งเตือนเพิ่มเติมได้ด้านล่าง
+          รับแจ้งเตือนส่วนตัวผ่าน LINE เมื่อแบตใกล้เต็ม 95%, แบตเหลือ 15%, หรือกระแสชาร์จ/ใช้ไฟเกินค่าที่แนะนำ - เลือกแจ้งเตือนเพิ่มเติมได้ด้านล่าง
         </p>
 
         {addFriendUrl && (
