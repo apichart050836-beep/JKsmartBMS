@@ -62,43 +62,24 @@ export function nowTimeLabel() {
 // already reads through the same pick(status, "soc", "percent_remain")
 // fallback this file now matches exactly (field order matters - "soc" is
 // checked first, matching the frontend's own precedence).
-// No blanket default here - each call site below applies whichever default
-// is "safe" for that specific check (missing data must never itself read as
-// a false "battery full" OR a false "battery empty"), matching the exact
-// per-condition defaults the original percent_remain-only code used.
-function socOf(status) {
-  return pick(status, "soc", "percent_remain");
-}
 function currentOf(status) {
   return pick(status, "current", "charge_current") ?? 0;
 }
 
-// Per explicit request (2026-08-29): cut down from the original 9 to these
-// 4 - cell imbalance, full 100%, near-empty-15/low-10 (merged into the one
-// flat "battery remaining 15%" below), and the "near" charge/discharge
-// variants (charge_near_recommended/discharge_near_recommended) were all
-// removed; near-full 95% and the "over" charge/discharge variants were
-// explicitly asked to stay.
+// Per explicit request (2026-08-29): cut down from the original 9 to 4 -
+// cell imbalance, full 100%, near-empty-15/low-10 (merged into one flat
+// "battery remaining 15%"), and the "near" charge/discharge variants
+// (charge_near_recommended/discharge_near_recommended) were all removed;
+// near-full 95% and the "over" charge/discharge variants were explicitly
+// asked to stay. Then per further follow-up (2026-09-01): soc_near_full_95
+// and soc_low_15 were dropped again - once the fleet-average low-15%/
+// near-full-95% alerts existed too (see checkFleetThresholds), having both
+// the per-device AND fleet-average version of the same threshold fired
+// redundantly for the same real event (multiple devices independently
+// crossing 95% within an hour of each other = 3 separate LINE messages for
+// what's really one "system charging up" event) - confirmed real,
+// explicitly asked to keep only the fleet-average version.
 const CONDITIONS = [
-  {
-    id: "soc_near_full_95",
-    check(status) {
-      const soc = socOf(status) ?? 0; // missing data must never read as "full"
-      return soc >= 95 && soc < 100;
-    },
-    message(status, settings, label) {
-      return `🔋 ${label}\nแบตใกล้เต็มแล้ว (${(socOf(status) ?? 0).toFixed(0)}%, ${(status.battery_voltage ?? 0).toFixed(2)}V)`;
-    },
-  },
-  {
-    id: "soc_low_15",
-    check(status) {
-      return (socOf(status) ?? 100) <= 15; // missing data must never read as "empty"
-    },
-    message(status, settings, label) {
-      return `🪫 ${label}\nแบตเหลือ ${(socOf(status) ?? 0).toFixed(0)}% (${(status.battery_voltage ?? 0).toFixed(2)}V)`;
-    },
-  },
   {
     id: "charge_over_recommended",
     check(status, settings) {
