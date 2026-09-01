@@ -19,7 +19,6 @@ import { api } from "../lib/apiClient.js";
 // is a number the hub owner has to set themselves, not a checkbox, so
 // they're kept out of PREFS_KEYS/"เลือกทั้งหมด" below.
 const DEFAULT_PREFS = {
-  remind3h: true,
   step20: true,
   fleetLow15: true,
   fleetNearFull95: true,
@@ -27,7 +26,7 @@ const DEFAULT_PREFS = {
   wattLimit: 0,
   chargeAmpLimit: 0,
 };
-const PREFS_KEYS = ["remind3h", "step20", "fleetLow15", "fleetNearFull95", "weatherEnabled"];
+const PREFS_KEYS = ["step20", "fleetLow15", "fleetNearFull95", "weatherEnabled"];
 
 export function LineNotifySettings({ open, onClose }) {
   const [status, setStatus] = useState(null); // { linked, linkedAt } | null while loading
@@ -293,10 +292,6 @@ export function LineNotifySettings({ open, onClose }) {
               <label className="flex items-center gap-2 border-b border-[var(--border)] pb-1.5 text-xs text-[var(--foreground)]">
                 <input type="checkbox" checked={allChecked} onChange={toggleAll} className="size-3.5" />
                 เลือกทั้งหมด
-              </label>
-              <label className="flex items-center gap-2 text-xs text-[var(--foreground)]">
-                <input type="checkbox" checked={prefs.remind3h} onChange={() => togglePref("remind3h")} className="size-3.5" />
-                แจ้งเตือนซ้ำทุก 3 ชม.
               </label>
               <label className="flex items-center gap-2 text-xs text-[var(--foreground)]">
                 <input type="checkbox" checked={prefs.step20} onChange={() => togglePref("step20")} className="size-3.5" />

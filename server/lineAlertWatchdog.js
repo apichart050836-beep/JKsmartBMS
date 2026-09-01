@@ -186,21 +186,21 @@ async function checkDevice(hubId, bmsKey, data, lineUserId) {
 }
 
 // Per-hub notification preferences, checklist on the LINE settings page.
-// Per explicit request (2026-08-29), trimmed down to exactly: remind every
-// 3h (the old 1h/2h alternatives removed), weather (rain/sun only),
-// fleet-average step 20% (the old 10% alternative removed), fleet-average
-// low-15%/near-full-95% thresholds (added 2026-08-31 - same idea as the
-// per-device soc_low_15/soc_near_full_95 CONDITIONS, but against the
-// aggregated fleet SOC instead of one device), plus the two user-set
-// numeric limits below. Stored at JK_BMS_HUB/{hubId}/line_prefs (see
-// routes/line.js) - same durable Firebase placement as line_link, for the
-// same ephemeral-Render-disk reason. remind3h/step20/fleetLow15/
-// fleetNearFull95 default ON (all part of the fleet-average section);
-// weatherEnabled + wattLimit/chargeAmpLimit are the "เลือกติกได้" group -
-// opt-in, off by default, since those vary per installation and there's no
-// one-size default that makes sense.
+// Per explicit request (2026-08-29), trimmed down to: weather (rain/sun
+// only), fleet-average step 20% (the old 10% alternative removed),
+// fleet-average low-15%/near-full-95% thresholds (added 2026-08-31 - same
+// idea as the per-device soc_low_15/soc_near_full_95 CONDITIONS, but
+// against the aggregated fleet SOC instead of one device), plus the two
+// user-set numeric limits below. The "remind every 3h while stuck" reminder
+// (was here between 2026-08-29 and 2026-09-01) was removed entirely per
+// follow-up request. Stored at JK_BMS_HUB/{hubId}/line_prefs (see routes/
+// line.js) - same durable Firebase placement as line_link, for the same
+// ephemeral-Render-disk reason. step20/fleetLow15/fleetNearFull95 default
+// ON (all part of the fleet-average section); weatherEnabled +
+// wattLimit/chargeAmpLimit are the "เลือกติกได้" group - opt-in, off by
+// default, since those vary per installation and there's no one-size
+// default that makes sense.
 const DEFAULT_PREFS = {
-  remind3h: true,
   step20: true,
   fleetLow15: true,
   fleetNearFull95: true,
@@ -212,7 +212,6 @@ function normalizePrefs(raw) {
   const p = { ...DEFAULT_PREFS, ...(raw && typeof raw === "object" ? raw : {}) };
   return {
     step: p.step20 ? 20 : null,
-    reminderMs: p.remind3h ? 3 * 60 * 60 * 1000 : null,
     fleetLow15: !!p.fleetLow15,
     fleetNearFull95: !!p.fleetNearFull95,
     weatherEnabled: !!p.weatherEnabled,
@@ -298,12 +297,6 @@ async function checkWeather(hubId, location, lineUserId) {
 // own comment on the specific flapping this fixes).
 const BIN_HYSTERESIS_PERCENT = 1;
 const lastNotifiedBinByHub = new Map();
-// If SOC sits still inside the same bin for a long time (e.g. parked at
-// 60% for hours), send one "still at X%" reminder every
-// `prefs.reminderMs` rather than staying silent forever - tracked
-// separately from the bin-cross timing so a real cross always resets the
-// reminder clock too (no double-notify right after a cross).
-const lastFleetNotifyAtByHub = new Map();
 
 // Shared with routes/line.js's /webhook (the on-demand "เช็คสถานะ" reply
 // feature, 2026-08-26) so a status check answers with EXACTLY the same
@@ -339,9 +332,8 @@ async function checkFleetAverage(hubId, devices, lineUserId, prefs) {
 
   if (prevBin === undefined) {
     // First observation ever (or since restart, or since this step size was
-    // just enabled) - just seed both baselines, never fire on it.
+    // just enabled) - just seed the baseline, never fire on it.
     lastNotifiedBinByHub.set(binKey, rawBin);
-    lastFleetNotifyAtByHub.set(hubId, Date.now());
     return;
   }
 
@@ -376,24 +368,7 @@ async function checkFleetAverage(hubId, devices, lineUserId, prefs) {
     } catch (err) {
       console.error(`[LineAlertWatchdog] fleet average push failed for ${hubId}: ${err.message}`);
     }
-    lastFleetNotifyAtByHub.set(hubId, Date.now());
-    return;
   }
-
-  if (!prefs.reminderMs) return; // remind3h disabled - no repeat reminder
-
-  // Same bin as last time - only remind once prefs.reminderMs has passed
-  // since the last notification (cross or reminder alike).
-  const lastNotifyAt = lastFleetNotifyAtByHub.get(hubId);
-  if (lastNotifyAt !== undefined && Date.now() - lastNotifyAt < prefs.reminderMs) return;
-
-  const message = `🔋 แบตเฉลี่ยทั้งระบบยังคงอยู่ที่ ${soc.toFixed(0)}% ${detail}`;
-  try {
-    await pushLineMessage(lineUserId, message);
-  } catch (err) {
-    console.error(`[LineAlertWatchdog] fleet average reminder push failed for ${hubId}: ${err.message}`);
-  }
-  lastFleetNotifyAtByHub.set(hubId, Date.now());
 }
 
 // Fleet-average low-15%/near-full-95% alerts, per explicit request
