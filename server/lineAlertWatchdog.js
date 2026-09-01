@@ -403,17 +403,33 @@ async function checkFleetAverage(hubId, devices, lineUserId, prefs) {
 // via prefs (unlike the per-device ones, which are always on). Edge-
 // triggered through line_alert_state (hub-scoped, bmsKey=""), same simple
 // breach/recover boolean shape as the Watt/Amp alerts below.
+//
+// Confirmed real flapping (2026-09-01): fired 5 times in 12 minutes while
+// soc sat in a 9-15% band, real telemetry noise crossing back over the flat
+// 15%/95% line repeatedly - same root cause the fleet-average %-step
+// alert's own BIN_HYSTERESIS_PERCENT already fixed. Same fix here: once
+// active, require the value to clear the line by
+// FLEET_THRESHOLD_HYSTERESIS_PERCENT before counting as recovered, not just
+// touch it.
+//
+// Also per explicit request: fleetLow15 only fires while the fleet is NOT
+// actively charging (current > 0, this codebase's established sign
+// convention) - a low reading that's already charging back up isn't the
+// urgent case this alert exists for. fleetNearFull95 has no such gate
+// (charging is how you GET near-full in the first place).
+const FLEET_THRESHOLD_HYSTERESIS_PERCENT = 2;
 const FLEET_LOW_15_CONDITION_ID = "fleet_soc_low_15";
 const FLEET_NEAR_FULL_95_CONDITION_ID = "fleet_soc_near_full_95";
 async function checkFleetThresholds(hubId, devices, lineUserId, prefs) {
-  const { soc, voltage } = computeFleetSummary(devices);
+  const { soc, current, voltage } = computeFleetSummary(devices);
   if (soc === null) return;
   const detail = `(${soc.toFixed(0)}%, ${voltage.toFixed(2)}V) (${nowTimeLabel()})`;
 
   if (prefs.fleetLow15) {
-    const isBreached = soc <= 15;
     const row = getAlertState(hubId, "", FLEET_LOW_15_CONDITION_ID);
     const wasActive = row ? !!row.active : false;
+    const socBreached = wasActive ? soc <= 15 + FLEET_THRESHOLD_HYSTERESIS_PERCENT : soc <= 15;
+    const isBreached = socBreached && current <= 0; // suppressed while charging
     if (isBreached && !wasActive) {
       try {
         await pushLineMessage(lineUserId, `🪫 แบตเฉลี่ยทั้งระบบเหลือน้อย ${detail}`);
@@ -427,9 +443,11 @@ async function checkFleetThresholds(hubId, devices, lineUserId, prefs) {
   }
 
   if (prefs.fleetNearFull95) {
-    const isBreached = soc >= 95 && soc < 100;
     const row = getAlertState(hubId, "", FLEET_NEAR_FULL_95_CONDITION_ID);
     const wasActive = row ? !!row.active : false;
+    const isBreached = wasActive
+      ? soc >= 95 - FLEET_THRESHOLD_HYSTERESIS_PERCENT && soc < 100
+      : soc >= 95 && soc < 100;
     if (isBreached && !wasActive) {
       try {
         await pushLineMessage(lineUserId, `🔋 แบตเฉลี่ยทั้งระบบใกล้เต็มแล้ว ${detail}`);
