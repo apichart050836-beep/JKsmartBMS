@@ -4,7 +4,7 @@ import { requireFirebase } from "../middleware/requireFirebase.js";
 import { readPath, writePath } from "../firebaseRead.js";
 import { isLineLoginConfigured, signLinkState, verifyLinkState, buildLoginUrl, exchangeCodeForLineUserId } from "../lineAuth.js";
 import { pushLineMessage, replyLineMessage, getBotInfo, verifyWebhookSignature, isWebhookConfigured } from "../lineNotify.js";
-import { computeFleetSummary, isFleetCountable, deviceLabel, nowTimeLabel } from "../lineAlertWatchdog.js";
+import { computeFleetSummary, isFleetCountable, deviceLabel, nowTimeLabel, currentOf } from "../lineAlertWatchdog.js";
 import { isWeatherConfigured, fetchWeather } from "../weatherService.js";
 
 const router = Router();
@@ -66,18 +66,31 @@ async function findHubByLineUserId(lineUserId) {
 
 // The on-demand counterpart to lineAlertWatchdog.js's automatic fleet
 // average - built from the exact same computeFleetSummary formula so the
-// numbers always agree with what the automatic alerts already said.
-function buildStatusReply(hubData) {
+// numbers always agree with what the automatic alerts already said. Per
+// explicit request (2026-09-02), also lists each device's own charge/
+// discharge current underneath, one per line (uses listFleetDevices - a
+// function declaration below, hoisted, so calling it here before its
+// textual definition is fine).
+function buildStatusReply(hubId, hubData) {
   const devices = Object.values(hubData).filter(isFleetCountable);
   if (devices.length === 0) return "ยังไม่พบข้อมูลอุปกรณ์ BMS ในระบบ";
   const { soc, remainingAh, capacityAh, current, voltage } = computeFleetSummary(devices);
   if (soc === null) return "ยังไม่พบข้อมูลอุปกรณ์ BMS ในระบบ";
   const currentLabel = current > 0 ? `+${current.toFixed(1)}` : current.toFixed(1);
+
+  const perDeviceLines = listFleetDevices(hubId, hubData).map(({ label, status }) => {
+    const c = currentOf(status);
+    const cLabel = c > 0 ? `+${c.toFixed(1)}` : c.toFixed(1);
+    const state = c > 0 ? "ชาร์จ" : c < 0 ? "ใช้งาน" : "นิ่ง";
+    return `  ${label}: ${cLabel}A (${state})`;
+  });
+
   return (
     `🔋 สถานะแบตปัจจุบัน\n` +
     `SOC: ${soc.toFixed(0)}% (${remainingAh.toFixed(1)}/${capacityAh.toFixed(1)}Ah)\n` +
     `แรงดัน: ${voltage.toFixed(2)}V\n` +
-    `กระแส: ${currentLabel}A\n` +
+    `กระแสรวม: ${currentLabel}A\n` +
+    `กระแสแต่ละเครื่อง:\n${perDeviceLines.join("\n")}\n` +
     `(${nowTimeLabel()})`
   );
 }
@@ -201,7 +214,7 @@ router.post("/webhook", async (req, res) => {
       let reply;
       if (text === "เช็คสภาพอากาศ") reply = await buildWeatherReply(found.hubData);
       else if (text === "เช็คเซ็นเซอร์วัดอุณหภูมิ") reply = buildTempReply(found.hubId, found.hubData);
-      else reply = buildStatusReply(found.hubData);
+      else reply = buildStatusReply(found.hubId, found.hubData);
       // No 3rd arg here - replyLineMessage already defaults to
       // QUICK_REPLY_ITEMS (see lineNotify.js).
       await replyLineMessage(replyToken, reply);

@@ -62,7 +62,7 @@ export function nowTimeLabel() {
 // already reads through the same pick(status, "soc", "percent_remain")
 // fallback this file now matches exactly (field order matters - "soc" is
 // checked first, matching the frontend's own precedence).
-function currentOf(status) {
+export function currentOf(status) {
   return pick(status, "current", "charge_current") ?? 0;
 }
 
