@@ -134,17 +134,20 @@ CREATE TABLE IF NOT EXISTS pending_signups (
 -- moved out of this table (which used to exist here) because Render's
 -- free-tier disk is ephemeral and gets wiped on every deploy, which was
 -- forcing a full LINE-reconnect on every single git push (explicit
--- report). Only the edge-trigger dedup state below stays in SQLite -
--- losing THAT on redeploy is harmless (self-heals within one poll cycle).
+-- report).
 
--- Edge-trigger state for each (hub, device, condition) the watchdog
--- checks (cell imbalance, SOC thresholds, charge/discharge current
--- thresholds - see lineAlertWatchdog.js's CONDITIONS list). `active=1`
--- means "already notified for this ongoing breach" - the watchdog only
--- pushes a message on the 0->1 transition, so a condition that stays
--- breached for hours doesn't spam a message every poll. It resets back to
--- 0 (and can fire again) once the underlying reading recovers below the
--- threshold.
+-- line_alert_state below is UNUSED as of 2026-09-01 - it also moved to
+-- Firebase (JK_BMS_HUB/{hubId}/line_alert_state/{bmsKeyOrHub}/{conditionId}
+-- - see lineAlertWatchdog.js's own comment), for the same ephemeral-disk
+-- reason as line_link above. The original reasoning for leaving it here
+-- ("losing it on redeploy self-heals within one poll cycle") turned out
+-- wrong: a real near-full-95% alert that should have fired once instead
+-- fired 9 times over ~4 hours, with the repeats landing almost exactly 15
+-- minutes apart - Render's free-tier services spin down after ~15 minutes
+-- with no HTTP traffic and cold-start on the next request, wiping this
+-- table far more often than "a rare deploy." Table definition left here
+-- (harmless, unused) rather than a DROP migration - same precedent as
+-- line_link's own old table above.
 CREATE TABLE IF NOT EXISTS line_alert_state (
   hub_id       TEXT NOT NULL,
   bms_key      TEXT NOT NULL DEFAULT '',

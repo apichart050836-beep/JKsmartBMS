@@ -1,4 +1,4 @@
-import { db } from "./db.js";
+import { writePath } from "./firebaseRead.js";
 import { pushLineMessage, isLineMessagingConfigured } from "./lineNotify.js";
 import { isWeatherConfigured, fetchWeather } from "./weatherService.js";
 import { pick } from "../src/lib/pick.js";
@@ -106,19 +106,42 @@ const CONDITIONS = [
   },
 ];
 
-// Prepared inline (not at module load time, like chargeWatchdog.js's own
-// queries) - this module is imported before db.js's migrate() has
-// necessarily run, and line_alert_state wouldn't exist yet.
-function getAlertState(hubId, bmsKey, conditionId) {
-  return db
-    .prepare(`SELECT active, updated_at FROM line_alert_state WHERE hub_id = ? AND bms_key = ? AND condition_id = ?`)
-    .get(hubId, bmsKey, conditionId);
+// Edge-trigger dedup state, in Firebase now - NOT SQLite (confirmed real
+// bug, 2026-09-01): a fleet-average near-full-95% alert sitting active for
+// hours fired 9 times in ~4 hours instead of once, and the back half of
+// those repeats landed almost exactly 15 minutes apart. That matches
+// Render's free-tier "spin down after 15 min with no HTTP traffic, cold
+// start on the next request" behavior - same ephemeral-disk root cause
+// line_link and line_prefs were already moved to Firebase for earlier this
+// session, just not yet applied here because the original reasoning
+// (losing this table only on a rare deploy is harmless/self-healing) didn't
+// account for a restart cadence this frequent for a LONG-lived breach.
+//
+// Reading costs nothing extra: line_alert_state is stored as just another
+// sibling key under each hub (JK_BMS_HUB/{hubId}/line_alert_state/...),
+// same placement pattern as line_link/line_prefs/location, so it's already
+// sitting in the SAME whole-tree object hubTreeCache polls once a second
+// for every other purpose in this file - getAlertState below is a plain
+// synchronous object lookup against that cache, not a new Firebase read.
+// Only setAlertState (an actual breach/recover transition, not every
+// cycle) needs a real write.
+function alertStateSlot(bmsKey) {
+  return bmsKey || "_hub"; // Firebase path segments can't safely be "" - bmsKey="" means a hub-level/fleet-wide condition
 }
-function setAlertState(hubId, bmsKey, conditionId, active) {
-  db.prepare(
-    `INSERT INTO line_alert_state (hub_id, bms_key, condition_id, active, updated_at) VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT (hub_id, bms_key, condition_id) DO UPDATE SET active = excluded.active, updated_at = excluded.updated_at`
-  ).run(hubId, bmsKey, conditionId, active, Date.now());
+function alertStatePath(hubId, bmsKey, conditionId) {
+  return `JK_BMS_HUB/${hubId}/line_alert_state/${alertStateSlot(bmsKey)}/${conditionId}`;
+}
+function getAlertState(hubId, bmsKey, conditionId) {
+  const tree = getCachedHubTree();
+  const val = tree?.[hubId]?.line_alert_state?.[alertStateSlot(bmsKey)]?.[conditionId];
+  return val && typeof val === "object" ? val : null;
+}
+async function setAlertState(hubId, bmsKey, conditionId, active) {
+  try {
+    await writePath(alertStatePath(hubId, bmsKey, conditionId), { active, updatedAt: Date.now() });
+  } catch (err) {
+    console.error(`[LineAlertWatchdog] setAlertState write failed for ${hubId}/${bmsKey}/${conditionId}: ${err.message}`);
+  }
 }
 
 async function checkDevice(hubId, bmsKey, data, lineUserId) {
@@ -143,25 +166,25 @@ async function checkDevice(hubId, bmsKey, data, lineUserId) {
       } catch (err) {
         console.error(`[LineAlertWatchdog] push failed for ${label}/${condition.id}: ${err.message}`);
       }
-      setAlertState(hubId, bmsKeyNorm, condition.id, 1);
+      await setAlertState(hubId, bmsKeyNorm, condition.id, 1);
     } else if (isBreached && wasActive && condition.repeatMs) {
       // Still breached, and this condition wants periodic reminders (per
       // explicit request for soc_low_10 - a critically-low battery left
       // un-charged for hours shouldn't go silent after the first notice).
-      // updated_at doubles as "last notified at" here since setAlertState
+      // updatedAt doubles as "last notified at" here since setAlertState
       // is the only writer and always stamps it fresh.
-      const lastNotifiedAt = row.updated_at ?? 0;
+      const lastNotifiedAt = row.updatedAt ?? 0;
       if (Date.now() - lastNotifiedAt >= condition.repeatMs) {
         try {
           await pushLineMessage(lineUserId, condition.message(status, settings, label));
         } catch (err) {
           console.error(`[LineAlertWatchdog] repeat push failed for ${label}/${condition.id}: ${err.message}`);
         }
-        setAlertState(hubId, bmsKeyNorm, condition.id, 1);
+        await setAlertState(hubId, bmsKeyNorm, condition.id, 1);
       }
     } else if (!isBreached && wasActive) {
       // Recovered - reset so the next real breach can notify again.
-      setAlertState(hubId, bmsKeyNorm, condition.id, 0);
+      await setAlertState(hubId, bmsKeyNorm, condition.id, 0);
     }
   }
 }
@@ -374,6 +397,7 @@ async function checkFleetAverage(hubId, devices, lineUserId, prefs) {
 // urgent case this alert exists for. fleetNearFull95 has no such gate
 // (charging is how you GET near-full in the first place).
 const FLEET_THRESHOLD_HYSTERESIS_PERCENT = 2;
+const FLEET_NEAR_FULL_REARM_PERCENT = 65;
 const FLEET_LOW_15_CONDITION_ID = "fleet_soc_low_15";
 const FLEET_NEAR_FULL_95_CONDITION_ID = "fleet_soc_near_full_95";
 async function checkFleetThresholds(hubId, devices, lineUserId, prefs) {
@@ -392,27 +416,32 @@ async function checkFleetThresholds(hubId, devices, lineUserId, prefs) {
       } catch (err) {
         console.error(`[LineAlertWatchdog] fleet low-15 push failed for ${hubId}: ${err.message}`);
       }
-      setAlertState(hubId, "", FLEET_LOW_15_CONDITION_ID, 1);
+      await setAlertState(hubId, "", FLEET_LOW_15_CONDITION_ID, 1);
     } else if (!isBreached && wasActive) {
-      setAlertState(hubId, "", FLEET_LOW_15_CONDITION_ID, 0);
+      await setAlertState(hubId, "", FLEET_LOW_15_CONDITION_ID, 0);
     }
   }
 
   if (prefs.fleetNearFull95) {
+    // Per further explicit request (2026-09-02): a small hysteresis band
+    // still re-fired once a day or more for a system that shallow-cycles
+    // near the 95% line (charges up, a small load pulls it back down a
+    // few %, charges back up again). Once notified, this now stays silent
+    // regardless of how many times it re-enters the 95-99% band, and only
+    // "rearms" (ready to fire again on the next climb to 95%) once soc has
+    // genuinely dropped to FLEET_NEAR_FULL_REARM_PERCENT (65%) first - a
+    // real deep-discharge-then-recharge cycle, not line noise.
     const row = getAlertState(hubId, "", FLEET_NEAR_FULL_95_CONDITION_ID);
     const wasActive = row ? !!row.active : false;
-    const isBreached = wasActive
-      ? soc >= 95 - FLEET_THRESHOLD_HYSTERESIS_PERCENT && soc < 100
-      : soc >= 95 && soc < 100;
-    if (isBreached && !wasActive) {
+    if (!wasActive && soc >= 95 && soc < 100) {
       try {
         await pushLineMessage(lineUserId, `🔋 แบตเฉลี่ยทั้งระบบใกล้เต็มแล้ว ${detail}`);
       } catch (err) {
         console.error(`[LineAlertWatchdog] fleet near-full-95 push failed for ${hubId}: ${err.message}`);
       }
-      setAlertState(hubId, "", FLEET_NEAR_FULL_95_CONDITION_ID, 1);
-    } else if (!isBreached && wasActive) {
-      setAlertState(hubId, "", FLEET_NEAR_FULL_95_CONDITION_ID, 0);
+      await setAlertState(hubId, "", FLEET_NEAR_FULL_95_CONDITION_ID, 1);
+    } else if (wasActive && soc <= FLEET_NEAR_FULL_REARM_PERCENT) {
+      await setAlertState(hubId, "", FLEET_NEAR_FULL_95_CONDITION_ID, 0);
     }
   }
 }
@@ -446,11 +475,11 @@ async function checkFleetPower(hubId, devices, lineUserId, prefs) {
     } catch (err) {
       console.error(`[LineAlertWatchdog] fleet watt push failed for ${hubId}: ${err.message}`);
     }
-    setAlertState(hubId, "", WATT_ALERT_CONDITION_ID, 1);
+    await setAlertState(hubId, "", WATT_ALERT_CONDITION_ID, 1);
   } else if (!isBreached && wasActive) {
     // Recovered - reset silently so the next real breach can notify again,
     // same as the per-device CONDITIONS above.
-    setAlertState(hubId, "", WATT_ALERT_CONDITION_ID, 0);
+    await setAlertState(hubId, "", WATT_ALERT_CONDITION_ID, 0);
   }
 }
 
@@ -478,9 +507,9 @@ async function checkFleetChargeCurrent(hubId, devices, lineUserId, prefs) {
     } catch (err) {
       console.error(`[LineAlertWatchdog] fleet charge-amp push failed for ${hubId}: ${err.message}`);
     }
-    setAlertState(hubId, "", CHARGE_AMP_ALERT_CONDITION_ID, 1);
+    await setAlertState(hubId, "", CHARGE_AMP_ALERT_CONDITION_ID, 1);
   } else if (!isBreached && wasActive) {
-    setAlertState(hubId, "", CHARGE_AMP_ALERT_CONDITION_ID, 0);
+    await setAlertState(hubId, "", CHARGE_AMP_ALERT_CONDITION_ID, 0);
   }
 }
 

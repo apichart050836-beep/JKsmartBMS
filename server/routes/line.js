@@ -1,7 +1,6 @@
 import { Router } from "express";
 import { requireAuth } from "../middleware/requireAuth.js";
 import { requireFirebase } from "../middleware/requireFirebase.js";
-import { db } from "../db.js";
 import { readPath, writePath } from "../firebaseRead.js";
 import { isLineLoginConfigured, signLinkState, verifyLinkState, buildLoginUrl, exchangeCodeForLineUserId } from "../lineAuth.js";
 import { pushLineMessage, replyLineMessage, getBotInfo, verifyWebhookSignature, isWebhookConfigured } from "../lineNotify.js";
@@ -10,9 +9,9 @@ import { isWeatherConfigured, fetchWeather } from "../weatherService.js";
 
 const router = Router();
 
-// The LINE link itself now lives in Firebase, NOT the local SQLite db
-// (unlike line_alert_state, which stays there) - per explicit report: every
-// git push triggers a Render redeploy, and Render's free tier disk is
+// The LINE link itself lives in Firebase, NOT the local SQLite db - per
+// explicit report: every git push triggers a Render redeploy, and Render's
+// free tier disk is
 // ephemeral (re-cloned fresh on every deploy, same reason gitStorage.js
 // exists for firmware files - see its own comment), so a SQLite-only link
 // was getting silently wiped on every single deploy, forcing a full
@@ -353,12 +352,10 @@ router.delete("/unlink", requireAuth, requireFirebase, async (req, res) => {
   if (!hubId) return;
   try {
     await writePath(lineLinkPath(hubId), null);
-    // line_alert_state (the per-condition edge-trigger dedup) stays in
-    // SQLite - unlike the link itself, losing this on redeploy is
-    // harmless self-healing (worst case: one duplicate notification for
-    // whatever's already breached right after a deploy), so it wasn't
-    // worth the same Firebase migration.
-    db.prepare(`DELETE FROM line_alert_state WHERE hub_id = ?`).run(hubId);
+    // line_alert_state moved to Firebase too now (2026-09-01) - see
+    // lineAlertWatchdog.js's own comment on why SQLite wasn't durable
+    // enough for it after all.
+    await writePath(`JK_BMS_HUB/${hubId}/line_alert_state`, null);
     res.json({ ok: true });
   } catch (err) {
     console.error(`DELETE /api/line/unlink failed for hub ${hubId}: ${err.message}`);
