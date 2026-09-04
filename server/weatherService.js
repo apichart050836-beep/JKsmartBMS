@@ -15,7 +15,7 @@ export function isWeatherConfigured() {
 /**
  * @param {number} latitude
  * @param {number} longitude
- * @returns {Promise<{ locationName: string, condition: string, temperature: number, rainMm: number }>}
+ * @returns {Promise<{ locationName: string, condition: string, icon: string, temperature: number, rainMm: number }>}
  */
 export async function fetchWeather(latitude, longitude) {
   if (!API_KEY) throw new Error("NO_API_KEY");
@@ -26,6 +26,13 @@ export async function fetchWeather(latitude, longitude) {
   return {
     locationName: data.name || "-",
     condition: data.weather?.[0]?.main ?? "Clear",
+    // OpenWeatherMap's own icon code, e.g. "01d"/"01n" - the trailing d/n is
+    // OpenWeatherMap's own day/night determination (based on the location's
+    // real sunrise/sunset, not just a clock guess), used to tell a genuinely
+    // clear NIGHT sky apart from a clear DAY one (see lineAlertWatchdog.js's
+    // checkWeather - confirmed real report of a ☀️ sun icon showing up at
+    // night for "Clear").
+    icon: data.weather?.[0]?.icon ?? "",
     temperature: data.main?.temp,
     rainMm: data.rain?.["1h"] ?? 0,
   };

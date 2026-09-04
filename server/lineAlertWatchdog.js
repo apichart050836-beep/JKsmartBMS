@@ -235,6 +235,16 @@ function normalizePrefs(raw) {
 // cycle - weather doesn't change on a 15s cadence, and there's no reason to
 // burn OpenWeatherMap's rate limit checking it that often.
 const WEATHER_CHECK_INTERVAL_MS = 10 * 60 * 1000;
+// Per explicit report (2026-09-02): real weather can flicker between rain
+// and clear/cloudy several times within a few hours (actual intermittent
+// showers, not a bug), and each genuine re-entry into "rain" fired its own
+// push under the plain edge-trigger below - felt too frequent even though
+// every individual fire was a real category change. This caps how often a
+// weather PUSH can go out at all, independent of how many real category
+// flickers happen in between (the category itself still gets tracked on
+// every check either way, so a change that happens right when the cooldown
+// clears is still caught, not lost).
+const WEATHER_PUSH_COOLDOWN_MS = 3 * 60 * 60 * 1000;
 const RAIN_CONDITIONS = new Set(["Rain", "Drizzle", "Thunderstorm"]);
 const SUN_CONDITIONS = new Set(["Clear"]);
 function weatherCategory(condition) {
@@ -242,15 +252,37 @@ function weatherCategory(condition) {
   if (SUN_CONDITIONS.has(condition)) return "sun";
   return "other";
 }
-const lastWeatherCheckAtByHub = new Map();
-const lastWeatherCategoryByHub = new Map();
+
+// In Firebase now, not a plain in-memory Map (confirmed real bug,
+// 2026-09-02, same root cause as line_alert_state's own migration above) -
+// this state was resetting on every Render free-tier restart, which could
+// make a genuinely-unchanged weather condition look like a fresh
+// transition again. Same piggyback-on-hubTreeCache read pattern - reading
+// costs nothing extra, only writing (on a real API fetch, at most once per
+// WEATHER_CHECK_INTERVAL_MS) does.
+function weatherStatePath(hubId) {
+  return `JK_BMS_HUB/${hubId}/line_weather_state`;
+}
+function getWeatherState(hubId) {
+  const tree = getCachedHubTree();
+  const val = tree?.[hubId]?.line_weather_state;
+  return val && typeof val === "object" ? val : {};
+}
+async function patchWeatherState(hubId, patch) {
+  try {
+    await writePath(weatherStatePath(hubId), { ...getWeatherState(hubId), ...patch });
+  } catch (err) {
+    console.error(`[LineAlertWatchdog] weather state write failed for ${hubId}: ${err.message}`);
+  }
+}
+
 async function checkWeather(hubId, location, lineUserId) {
   if (!isWeatherConfigured()) return;
   if (!location || typeof location.lat !== "number" || typeof location.lng !== "number") return;
 
-  const lastCheckedAt = lastWeatherCheckAtByHub.get(hubId);
-  if (lastCheckedAt !== undefined && Date.now() - lastCheckedAt < WEATHER_CHECK_INTERVAL_MS) return;
-  lastWeatherCheckAtByHub.set(hubId, Date.now());
+  const state = getWeatherState(hubId);
+  const lastCheckedAt = state.lastCheckAt ?? 0;
+  if (Date.now() - lastCheckedAt < WEATHER_CHECK_INTERVAL_MS) return;
 
   let weather;
   try {
@@ -261,16 +293,27 @@ async function checkWeather(hubId, location, lineUserId) {
   }
 
   const category = weatherCategory(weather.condition);
-  const prevCategory = lastWeatherCategoryByHub.get(hubId);
-  lastWeatherCategoryByHub.set(hubId, category);
+  const prevCategory = state.category;
+  await patchWeatherState(hubId, { category, lastCheckAt: Date.now() });
 
   // Edge-triggered like everything else in this file: only notify the
   // moment it TURNS into rain/sun from something else, not on every check
   // while it stays that way, and never on the very first observation.
   if (prevCategory === undefined || category === prevCategory || category === "other") return;
 
-  const icon = category === "rain" ? "🌧️" : "☀️";
-  const label = category === "rain" ? "ฝนตก" : "แดดออก";
+  // Cooldown gate, separate from the edge-trigger above - see
+  // WEATHER_PUSH_COOLDOWN_MS's own comment.
+  const lastPushAt = state.lastPushAt ?? 0;
+  if (Date.now() - lastPushAt < WEATHER_PUSH_COOLDOWN_MS) return;
+
+  // OpenWeatherMap's own icon code ends in "d" (day) or "n" (night), based
+  // on that location's real sunrise/sunset - confirmed real report of a ☀️
+  // showing up at night for "Clear" using a fixed sun icon regardless of
+  // time. "rain" has no day/night distinction worth drawing (🌧️ reads fine
+  // either way).
+  const isNight = weather.icon?.endsWith("n");
+  const icon = category === "rain" ? "🌧️" : isNight ? "🌙" : "☀️";
+  const label = category === "rain" ? "ฝนตก" : isNight ? "ท้องฟ้าแจ่มใส (กลางคืน)" : "ท้องฟ้าแจ่มใส";
   const tempLabel = typeof weather.temperature === "number" ? ` ${weather.temperature.toFixed(0)}°C` : "";
   const message = `${icon} สภาพอากาศ${location.name ? ` (${location.name})` : ""}: ${label}${tempLabel} (${nowTimeLabel()})`;
   try {
@@ -278,6 +321,7 @@ async function checkWeather(hubId, location, lineUserId) {
   } catch (err) {
     console.error(`[LineAlertWatchdog] weather push failed for ${hubId}: ${err.message}`);
   }
+  await patchWeatherState(hubId, { lastPushAt: Date.now() });
 }
 
 // Fleet-wide (every BMS device under one hub, not per-device) average
