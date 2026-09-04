@@ -129,9 +129,14 @@ router.get("/:hubId/history/daily", requireAuth, (req, res) => {
 // thinned, not just truncated to the front) rather than returning every
 // single 5s-interval row for a full day - a cell-voltage row is much
 // heavier than the pack-level rows /daily already returns uncapped (up to
-// ~24 numbers each instead of 4), and this app has spent real effort this
-// session cutting response/bandwidth size elsewhere.
-const MAX_CELL_POINTS = 1500;
+// ~24 numbers each instead of 4). Per further explicit request to cut
+// bandwidth on this endpoint specifically: dropped from an initial 1500 to
+// 360 (one point every ~4 minutes across a day) - the chart itself renders
+// at well under 1500px wide, so anything past a few hundred points was
+// already finer than a viewer could ever actually distinguish on screen;
+// this alone cuts the response to about a quarter its previous size with no
+// visible difference in the rendered chart.
+const MAX_CELL_POINTS = 360;
 function thinPoints(points, max) {
   if (points.length <= max) return points;
   const step = points.length / max;
@@ -151,6 +156,19 @@ router.get("/:hubId/history/cells", requireAuth, (req, res) => {
   if (!m) return res.status(400).json({ error: "Invalid date" });
   const dayStart = bangkokMs(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
   const dayEnd = dayStart + 24 * 60 * 60 * 1000;
+
+  // A day that's fully over can never get another row for it (this hub's
+  // telemetry only ever inserts at "now") - safe to cache indefinitely,
+  // same idea as the immutable-static-asset caching elsewhere in this app.
+  // Per further explicit bandwidth request: repeat views of an already-open
+  // past day (scrubbing back and forth, a reload) now cost nothing at all
+  // instead of re-fetching the same rows from Render every time. Today's
+  // own data keeps changing, so it only gets a short cache instead.
+  if (dayEnd <= Date.now()) {
+    res.set("Cache-Control", "private, max-age=31536000, immutable");
+  } else {
+    res.set("Cache-Control", "private, max-age=30");
+  }
 
   const rows = db
     .prepare(
