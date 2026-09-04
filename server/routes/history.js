@@ -122,6 +122,61 @@ router.get("/:hubId/history/daily", requireAuth, (req, res) => {
   });
 });
 
+// Individual cell voltages over one day (explicit request) - "SOC/current
+// over time" already has the /daily endpoint above; this is the per-cell
+// analog, reading the cell_voltages_json column telemetryLogger.js now
+// writes alongside the pack-level ones. Capped at MAX_CELL_POINTS (evenly
+// thinned, not just truncated to the front) rather than returning every
+// single 5s-interval row for a full day - a cell-voltage row is much
+// heavier than the pack-level rows /daily already returns uncapped (up to
+// ~24 numbers each instead of 4), and this app has spent real effort this
+// session cutting response/bandwidth size elsewhere.
+const MAX_CELL_POINTS = 1500;
+function thinPoints(points, max) {
+  if (points.length <= max) return points;
+  const step = points.length / max;
+  const out = [];
+  for (let i = 0; i < max; i++) out.push(points[Math.floor(i * step)]);
+  return out;
+}
+
+router.get("/:hubId/history/cells", requireAuth, (req, res) => {
+  const { hubId } = req.params;
+  const bmsKey = req.query.bmsKey ?? "";
+  const dateStr = String(req.query.date ?? "");
+  if (!isSafeKey(hubId) || !canAccessHub(req.user, hubId)) return res.status(403).json({ error: "Forbidden" });
+  if (bmsKey && !isSafeKey(bmsKey)) return res.status(400).json({ error: "Invalid bmsKey" });
+
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+  if (!m) return res.status(400).json({ error: "Invalid date" });
+  const dayStart = bangkokMs(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const dayEnd = dayStart + 24 * 60 * 60 * 1000;
+
+  const rows = db
+    .prepare(
+      `SELECT ts, cell_voltages_json
+       FROM telemetry_log
+       WHERE hub_id = ? AND bms_key = ? AND ts >= ? AND ts < ? AND cell_voltages_json IS NOT NULL
+       ORDER BY ts ASC`
+    )
+    .all(hubId, bmsKey, dayStart, dayEnd);
+
+  const points = thinPoints(
+    rows.map((r) => {
+      let cells;
+      try {
+        cells = JSON.parse(r.cell_voltages_json);
+      } catch {
+        cells = [];
+      }
+      return { ts: r.ts, cells };
+    }),
+    MAX_CELL_POINTS
+  );
+
+  res.json({ date: dateStr, points });
+});
+
 // Fleet-wide (every bms_key under this hub, not just one device) peak
 // charge/discharge power today, for the Solar Hybrid Energy Flow panel's
 // "Net Battery Power"/"Net Load Power" cards - per explicit request. Sums

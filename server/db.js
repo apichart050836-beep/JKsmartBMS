@@ -41,6 +41,12 @@ export function migrate() {
   const schema = fs.readFileSync(schemaPath, "utf8");
   db.exec(schema);
   addColumnIfMissing("firmware_releases", "md5", "TEXT");
+  // Per-cell voltage history (explicit request) - a JSON-encoded array
+  // (e.g. "[3.281,3.279,...]"), not one column per cell, since cell count
+  // varies per device and isn't fixed - see telemetryLogger.js's own
+  // comment on why this rides along in the same row/interval as the
+  // existing pack-level columns instead of a separate table.
+  addColumnIfMissing("telemetry_log", "cell_voltages_json", "TEXT");
 }
 
 // CREATE TABLE IF NOT EXISTS above only affects a brand-new database - a

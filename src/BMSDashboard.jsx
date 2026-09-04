@@ -12,6 +12,7 @@ import { DetailedLog } from "./components/DetailedLog.jsx";
 import { SystemHero } from "./components/SystemHero.jsx";
 import { PowerFlowChart } from "./components/PowerFlowChart.jsx";
 import { ChargeDischargeChart } from "./components/ChargeDischargeChart.jsx";
+import { CellVoltageHistoryChart } from "./components/CellVoltageHistoryChart.jsx";
 import { SettingsPanel } from "./components/SettingsPanel.jsx";
 import { TopBar } from "./components/TopBar.jsx";
 import { Modal } from "./components/Modal.jsx";
@@ -1052,6 +1053,8 @@ const loadConsumptionPower = totalPower < 0 ? Math.abs(totalPower) : 0;
                   </section>
 
                   <ChargeDischargeChart history={active.powerHistory} hubId={activeConfig.hubId} bmsKey={activeConfig.bmsKey} />
+
+                  <CellVoltageHistoryChart hubId={activeConfig.hubId} bmsKey={activeConfig.bmsKey} />
                 </div>
               </>
             )}

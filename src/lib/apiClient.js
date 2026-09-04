@@ -53,6 +53,8 @@ export const api = {
     }),
   historyDaily: (hubId, bmsKey, date) =>
     request(`/api/hubs/${encodeURIComponent(hubId)}/history/daily?date=${date}&bmsKey=${encodeURIComponent(bmsKey ?? "")}`),
+  historyCells: (hubId, bmsKey, date) =>
+    request(`/api/hubs/${encodeURIComponent(hubId)}/history/cells?date=${date}&bmsKey=${encodeURIComponent(bmsKey ?? "")}`),
   historyMonthly: (hubId, bmsKey, month) =>
     request(`/api/hubs/${encodeURIComponent(hubId)}/history/monthly?month=${month}&bmsKey=${encodeURIComponent(bmsKey ?? "")}`),
   historyYearly: (hubId, bmsKey, year) =>

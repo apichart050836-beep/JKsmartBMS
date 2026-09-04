@@ -1,6 +1,7 @@
 import { db } from "./db.js";
 import { flattenHubs } from "../src/lib/flattenHubs.js";
 import { getCachedHubTree } from "./hubTreeCache.js";
+import { pick } from "../src/lib/pick.js";
 
 // Firebase only ever holds the current-moment status node, never history -
 // this is the one place that turns "now" into "over time" by writing a row
@@ -19,11 +20,11 @@ const WARMUP_SNAPSHOTS = 5;
 
 // Prepared lazily (not at module load) - this module is imported (and
 // startTelemetryLogger scheduled) before migrate() has necessarily run.
-function insertSnapshot(hubId, bmsKey, ts, packVoltage, chargeCurrent, capacityRemain, percentRemain) {
+function insertSnapshot(hubId, bmsKey, ts, packVoltage, chargeCurrent, capacityRemain, percentRemain, cellVoltagesJson) {
   db.prepare(
-    `INSERT INTO telemetry_log (hub_id, bms_key, ts, pack_voltage, charge_current, capacity_remain, percent_remain)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(hubId, bmsKey, ts, packVoltage, chargeCurrent, capacityRemain, percentRemain);
+    `INSERT INTO telemetry_log (hub_id, bms_key, ts, pack_voltage, charge_current, capacity_remain, percent_remain, cell_voltages_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(hubId, bmsKey, ts, packVoltage, chargeCurrent, capacityRemain, percentRemain, cellVoltagesJson);
 }
 
 async function snapshotOnce() {
@@ -36,6 +37,12 @@ async function snapshotOnce() {
     // Skip the placeholder/simplified shape (status is just an "online"/
     // "offline" string) - it has no numeric telemetry to log.
     if (!status || typeof status !== "object") continue;
+    // Same field-name fallback + positive-only filter useBmsPackLive.js's
+    // live Cell Voltage Monitoring grid already uses, so the historical
+    // chart shows exactly the same cells the live grid does. null (not "[]")
+    // when there's nothing real yet, so a device with no cell data at all
+    // doesn't log a misleading empty-but-present array.
+    const cells = (pick(status, "cellVoltages", "cell_voltages") ?? []).filter((v) => v > 0);
     insertSnapshot(
       hubId,
       bmsKey ?? "",
@@ -43,7 +50,8 @@ async function snapshotOnce() {
       status.battery_voltage ?? null,
       status.charge_current ?? null,
       status.capacity_remain ?? null,
-      status.percent_remain ?? null
+      status.percent_remain ?? null,
+      cells.length ? JSON.stringify(cells) : null
     );
   }
 }
